@@ -1,0 +1,216 @@
+import { parse as luaparse } from 'luaparse'
+
+export interface KoreaderHighlight {
+  /** Highlight text. May be empty for page bookmarks. */
+  text: string
+  /** Personal note attached to the highlight, if any. */
+  note?: string
+  page?: number | string
+  chapter?: string
+  /** ISO-ish KOReader datetime: "YYYY-MM-DD HH:MM:SS" (local time on device). */
+  datetime?: string
+  /** When KOReader has edited the highlight after creation. */
+  datetimeUpdated?: string
+  /** Stable-ish per-highlight key derived from KOReader fields, used for dedup. */
+  id: string
+}
+
+export interface KoreaderSidecar {
+  title: string
+  authors?: string
+  language?: string
+  description?: string
+  /**
+   * KOReader's content-derived fingerprint. Stable across file moves and Calibre id changes.
+   * Falls back to docPath when absent on legacy sidecars.
+   */
+  partialMd5?: string
+  /** Absolute path KOReader thinks the document lives at. */
+  docPath?: string
+  highlights: KoreaderHighlight[]
+}
+
+/** Walk a FileSystemDirectoryHandle yielding `metadata.*.lua` file handles. */
+export async function* walkSidecars(handle: any): AsyncGenerator<any> {
+  if (handle.kind === 'file') {
+    if (handle.name && /metadata\..+\.lua$/i.test(handle.name)) {
+      yield handle
+    }
+    return
+  }
+  if (handle.kind === 'directory') {
+    for await (const child of handle.values()) {
+      yield* walkSidecars(child)
+    }
+  }
+}
+
+/**
+ * Parse a Lua sidecar text into a typed object. Returns null when the sidecar
+ * is a stub (e.g. opened-but-never-annotated; doc_props missing/empty).
+ */
+export function parseSidecar(text: string): KoreaderSidecar | null {
+  let raw: any
+  try {
+    raw = luaToObject(text)
+  } catch (e) {
+    console.warn('sync-koreader-highlights: lua parse failure', e)
+    return null
+  }
+
+  const docProps = raw?.doc_props
+  if (!docProps || typeof docProps !== 'object' || Object.keys(docProps).length === 0) {
+    return null
+  }
+
+  const title: string = String(docProps.title ?? '').trim()
+  if (!title) return null
+
+  const authors = normaliseAuthors(docProps.authors)
+  const highlights = extractHighlights(raw)
+
+  return {
+    title,
+    authors,
+    language: stringOrUndefined(docProps.language),
+    description: stringOrUndefined(docProps.description),
+    partialMd5: stringOrUndefined(raw.partial_md5_checksum),
+    docPath: stringOrUndefined(raw.doc_path),
+    highlights,
+  }
+}
+
+function normaliseAuthors(value: any): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const cleaned = value.replace(/\\\n/g, ', ').trim()
+  return cleaned || undefined
+}
+
+function stringOrUndefined(value: any): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+function extractHighlights(raw: any): KoreaderHighlight[] {
+  const out: KoreaderHighlight[] = []
+
+  // Modern KOReader: top-level `annotations` array, each with text/note/datetime/pageno/chapter/pos0/pos1.
+  const annotations = raw.annotations
+  if (Array.isArray(annotations)) {
+    for (const a of annotations) {
+      if (!a) continue
+      out.push({
+        text: stringOrUndefined(a.text) ?? '',
+        note: stringOrUndefined(a.note),
+        page: a.pageno ?? a.page,
+        chapter: stringOrUndefined(a.chapter),
+        datetime: stringOrUndefined(a.datetime),
+        datetimeUpdated: stringOrUndefined(a.datetime_updated),
+        id: deriveHighlightId(a),
+      })
+    }
+    return out
+  }
+
+  // Legacy: `bookmarks` array with notes/text fields.
+  const bookmarks = raw.bookmarks
+  if (Array.isArray(bookmarks)) {
+    for (const b of bookmarks) {
+      if (!b) continue
+      out.push({
+        text: stringOrUndefined(b.notes) ?? stringOrUndefined(b.text) ?? '',
+        note: undefined,
+        page: b.page,
+        chapter: stringOrUndefined(b.chapter),
+        datetime: stringOrUndefined(b.datetime),
+        id: deriveHighlightId(b),
+      })
+    }
+  }
+  return out
+}
+
+function deriveHighlightId(a: any): string {
+  // Compose a stable per-highlight key. KOReader doesn't ship a UUID, but
+  // the (datetime, pos0, pos1) tuple is unique within a sidecar; falling back
+  // to the highlight text covers older bookmark-style entries.
+  const parts = [a.datetime, a.pos0, a.pos1, a.notes, a.text]
+    .filter((p) => p !== undefined && p !== null && p !== '')
+    .map(String)
+  return parts.join('|') || crypto.randomUUID()
+}
+
+/**
+ * Convert a Lua return-table source into a JS object via luaparse.
+ * Handles nested tables and array-style sequences.
+ */
+function luaToObject(text: string): any {
+  const ast = luaparse(text, {
+    comments: false,
+    locations: false,
+    ranges: false,
+    luaVersion: 'LuaJIT',
+  })
+  const ret = (ast.body[0] as any)?.arguments?.[0]
+  if (!ret || ret.type !== 'TableConstructorExpression') {
+    return {}
+  }
+  return readTable(ret)
+}
+
+function readTable(node: any): any {
+  const fields = node.fields ?? []
+  if (fields.length === 0) return {}
+
+  const allArrayStyle = fields.every((f: any) => f.type === 'TableValue')
+  if (allArrayStyle) {
+    return fields.map((f: any) => readValue(f.value))
+  }
+
+  const obj: Record<string, any> = {}
+  for (const f of fields) {
+    const key = readKey(f)
+    if (key === undefined) continue
+    if (key === 'stats') continue // KOReader's per-document stats; large, irrelevant.
+    obj[key] = readValue(f.value)
+  }
+  return obj
+}
+
+function readKey(f: any): string | number | undefined {
+  if (f.type === 'TableKeyString') return f.key.name
+  if (f.type === 'TableKey') {
+    const k = f.key
+    if (k.type === 'StringLiteral') return stripQuotes(k.raw ?? k.value)
+    if (k.type === 'NumericLiteral') return k.value
+  }
+  return undefined
+}
+
+function readValue(v: any): any {
+  if (!v) return undefined
+  if (v.type === 'StringLiteral') return stripQuotes(v.raw ?? v.value)
+  if (v.type === 'NumericLiteral') return v.value
+  if (v.type === 'BooleanLiteral') return v.value
+  if (v.type === 'NilLiteral') return undefined
+  if (v.type === 'TableConstructorExpression') return readTable(v)
+  if (v.type === 'UnaryExpression' && v.operator === '-' && v.argument?.type === 'NumericLiteral') {
+    return -v.argument.value
+  }
+  return undefined
+}
+
+function stripQuotes(raw: string): string {
+  if (typeof raw !== 'string') return raw
+  if (raw.length >= 2 && (raw.startsWith('"') || raw.startsWith("'")) && raw.endsWith(raw[0])) {
+    return raw.slice(1, -1)
+  }
+  return raw
+}
+
+/** Sidecar key used for dedup in `bookIdsMap`. Stable across file moves when md5 is present. */
+export function sidecarKey(sidecar: KoreaderSidecar): string {
+  if (sidecar.partialMd5) return `md5:${sidecar.partialMd5}`
+  return `meta:${sidecar.authors ?? ''}|||${sidecar.title}`
+}
