@@ -73,16 +73,16 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
   const updated = parseKoreaderDatetime(h.datetimeUpdated)
 
   const view = {
-    text: escapeForLogseq(h.text || PAGE_BOOKMARK_PLACEHOLDER),
-    page: h.page ?? '',
-    chapter: h.chapter ?? '',
-    datetime: h.datetime ?? '',
+    text: escapeHighlightText(h.text || PAGE_BOOKMARK_PLACEHOLDER),
+    page: sanitisePropertyValue(h.page),
+    chapter: sanitisePropertyValue(h.chapter),
+    datetime: sanitisePropertyValue(h.datetime),
     journalDay: safeFormat(created, ctx.preferredDateFormat),
     timeOfDay: timeOfDay(h.datetime),
-    datetimeUpdated: h.datetimeUpdated ?? '',
+    datetimeUpdated: sanitisePropertyValue(h.datetimeUpdated),
     journalDayUpdated: safeFormat(updated, ctx.preferredDateFormat),
     timeOfDayUpdated: timeOfDay(h.datetimeUpdated),
-    id: h.id,
+    id: sanitisePropertyValue(h.id) ?? '',
   }
 
   const content = renderTemplate(ctx.templates.highlightBlock, view)
@@ -96,11 +96,11 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
 /** Render the per-book "header" content (title block of the page). */
 export function renderBookHeader(sidecar: KoreaderSidecar, ctx: RenderContext): string {
   return renderTemplate(ctx.templates.bookHeader, {
-    title: sidecar.title,
-    authors: sidecar.authors ?? '',
-    language: sidecar.language ?? '',
-    koreaderId: sidecar.partialMd5 ?? sidecar.docPath ?? '',
-    description: sidecar.description ?? '',
+    title: sanitisePropertyValue(sidecar.title) ?? '',
+    authors: sanitisePropertyValue(sidecar.authors) ?? '',
+    language: sanitisePropertyValue(sidecar.language) ?? '',
+    koreaderId: sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath) ?? '',
+    description: sanitisePropertyValue(sidecar.description) ?? '',
   })
 }
 
@@ -185,27 +185,56 @@ export function renderIndexReceipt(input: IndexReceiptInput): IBatchBlock {
 }
 
 /**
- * Escape a few characters that confuse Logseq's markdown bullet parser.
+ * Escape characters that break Logseq's block-level rendering.
  * - leading dashes turn into list items
- * - newlines need to remain inside the same block
+ * - the highlight text itself goes on its own first line, but property
+ *   lines below it must not get appended to the blockquote, so collapse
+ *   internal newlines to spaces.
  */
-function escapeForLogseq(s: string): string {
+function escapeHighlightText(s: string): string {
   return s
-    .replace(/^-/gm, '\\-')
     .replace(/\r\n/g, '\n')
+    .replace(/\n+/g, ' ')
+    .replace(/^-/gm, '\\-')
+    .trim()
+}
+
+/**
+ * Make a value safe to use as a Logseq block property value. Empty or
+ * unrenderable values become undefined so the surrounding Mustache
+ * `{{#var}}…{{/var}}` section drops out entirely.
+ */
+function sanitisePropertyValue(value: any): string | undefined {
+  if (value === undefined || value === null) return undefined
+  let s = String(value)
+  // Strip newlines (multi-line property values confuse Logseq's parser),
+  // collapse property-syntax sequences ("key:: value" inside the value),
+  // and trim outer whitespace.
+  s = s.replace(/\r?\n/g, ' ').replace(/::/g, ':').trim()
+  return s.length > 0 ? s : undefined
 }
 
 function renderTemplate(template: string, view: Record<string, any>): string {
   // Disable HTML escaping; Logseq blocks want raw markdown.
   const out = Mustache.render(template, view, undefined, { escape: (v: string) => v })
-  // Mustache leaves blank-line gaps where conditional sections were absent.
-  return collapseBlankLines(out)
+  return collapseEmptyLines(out)
 }
 
-function collapseBlankLines(s: string): string {
+/**
+ * Drop blank lines and any property line whose value rendered empty
+ * (e.g. `koreader-id:: ` with no value). Empty-value property lines
+ * confuse Logseq's property indexer and have caused page-load crashes.
+ */
+function collapseEmptyLines(s: string): string {
   return s
     .split('\n')
-    .filter((line, i, arr) => !(line.trim() === '' && (i === 0 || arr[i - 1].trim() === '')))
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (trimmed === '') return false
+      const propMatch = trimmed.match(/^[a-z][a-z0-9-]*::\s*(.*)$/i)
+      if (propMatch && propMatch[1].trim() === '') return false
+      return true
+    })
     .join('\n')
     .trim()
 }

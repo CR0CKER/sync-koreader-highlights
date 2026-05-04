@@ -163,17 +163,29 @@ function readTable(node: any): any {
   const fields = node.fields ?? []
   if (fields.length === 0) return {}
 
+  // Implicit-sequence form: `{ a, b, c }` → fields are all TableValue.
   const allArrayStyle = fields.every((f: any) => f.type === 'TableValue')
   if (allArrayStyle) {
     return fields.map((f: any) => readValue(f.value))
   }
 
+  // Read into a keyed object first, then convert to an array if the kept
+  // keys are 1..N integers (KOReader writes annotations as
+  // `["1"] = {…}, ["2"] = {…}`, which is a sequence semantically but
+  // doesn't show up as Lua's implicit-sequence parse shape).
   const obj: Record<string, any> = {}
   for (const f of fields) {
     const key = readKey(f)
     if (key === undefined) continue
-    if (key === 'stats') continue // KOReader's per-document stats; large, irrelevant.
-    obj[key] = readValue(f.value)
+    if (key === 'stats') continue
+    obj[String(key)] = readValue(f.value)
+  }
+  const keys = Object.keys(obj)
+  if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+    const intKeys = keys.map(Number).sort((a, b) => a - b)
+    if (intKeys[0] === 1 && intKeys[intKeys.length - 1] === intKeys.length) {
+      return intKeys.map((i) => obj[String(i)])
+    }
   }
   return obj
 }

@@ -58,11 +58,13 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   const syncDate = new Date()
   const progress = opts.onProgress ?? (() => {})
 
-  progress('Walking sidecars…')
+  console.log('sync-koreader-highlights: walking root directory:', opts.directoryHandle?.name)
+  progress(`Walking sidecars in "${opts.directoryHandle?.name ?? '?'}"…`)
   const sidecars: KoreaderSidecar[] = []
   let walked = 0
   for await (const fileHandle of walkSidecars(opts.directoryHandle)) {
     walked++
+    console.log('sync-koreader-highlights: walked sidecar', walked, fileHandle.name)
     if (walked % 5 === 0) progress(`Walking sidecars… (${walked})`)
     let file: File
     try {
