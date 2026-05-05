@@ -165,15 +165,22 @@ export function renderBookHeaderTemplate(sidecar: KoreaderSidecar, ctx: RenderCo
   const tpl = ctx.templates.bookHeader ?? ''
   if (tpl.trim() === '') return null
   const authors = (sidecar.authors ?? []).map((a) => sanitisePropertyValue(a)).filter((a): a is string => !!a)
+  const tags = (sidecar.keywords ?? []).map((t) => sanitisePropertyValue(t)).filter((t): t is string => !!t)
   const view = {
     title: sanitisePropertyValue(sidecar.title) ?? '',
     authors: authors.join(', '),
     authorsLinked: authors
-      .map((a) => `[[${a.replace(/\[/g, '(').replace(/\]/g, ')')}]]`)
+      .map((a) => `[[${sanitiseForWikilink(a)}]]`)
       .join(', '),
     language: sanitisePropertyValue(sidecar.language) ?? '',
     summary: sanitisePropertyValue(sidecar.description) ?? '',
     description: sanitisePropertyValue(sidecar.description) ?? '',
+    series: sanitisePropertyValue(sidecar.series) ?? '',
+    seriesLinked: renderSeriesAsWikilink(sidecar.series) ?? '',
+    tags: tags.join(', '),
+    tagsLinked: tags
+      .map((t) => `[[${sanitiseForWikilink(t)}]]`)
+      .join(', '),
     koreaderId: sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath) ?? '',
   }
   return renderTemplate(tpl, view)
@@ -190,12 +197,35 @@ export function bookPageProperties(sidecar: KoreaderSidecar): Record<string, str
   if (title) out.title = title
   const authorsLink = renderAuthorsAsWikilinks(sidecar.authors)
   if (authorsLink) out.author = authorsLink
+  const seriesLink = renderSeriesAsWikilink(sidecar.series)
+  if (seriesLink) out.series = seriesLink
+  const tagsLink = renderTagsAsWikilinks(sidecar.keywords)
+  if (tagsLink) out.tags = tagsLink
   const summary = sanitisePropertyValue(sidecar.description)
   if (summary) out.summary = summary
   // koreader-id intentionally omitted from page properties — it's
   // human-irrelevant. The plugin's bookIdsMap holds the same identifier
   // internally, so re-syncs still dedup correctly.
   return out
+}
+
+function sanitiseForWikilink(s: string): string {
+  return s.replace(/\[/g, '(').replace(/\]/g, ')')
+}
+
+function renderSeriesAsWikilink(series: string | undefined): string | undefined {
+  const cleaned = sanitisePropertyValue(series)
+  if (!cleaned) return undefined
+  return `[[${sanitiseForWikilink(cleaned)}]]`
+}
+
+function renderTagsAsWikilinks(tags: string[] | undefined): string | undefined {
+  if (!tags || tags.length === 0) return undefined
+  const links = tags
+    .map((t) => sanitisePropertyValue(t))
+    .filter((t): t is string => !!t)
+    .map((t) => `[[${sanitiseForWikilink(t)}]]`)
+  return links.length > 0 ? links.join(', ') : undefined
 }
 
 /**
@@ -397,14 +427,18 @@ export function truncate(s: string | undefined, max = MAX_PROPERTY_LENGTH): stri
 
 /**
  * Replace characters in a book title that would break Logseq syntax when
- * the name is referenced via [[wikilink]]. Square brackets in particular
- * collide with the wikilink delimiters: `[[The Economist [May 2nd 2026]]]`
- * is parsed as `[[The Economist [May 2nd 2026]]` + `]`.
+ * the name is referenced via [[wikilink]] or passed to createPage.
+ *  - `[`/`]` collide with the wikilink delimiters (e.g.
+ *    `[[The Economist [May 2nd 2026]]]` parses as
+ *    `[[The Economist [May 2nd 2026]]` + literal `]`).
+ *  - `:` is reserved by Logseq's property syntax and createPage rejects
+ *    names containing it ("This Life: Secular Faith…" → use em dash).
  */
 export function sanitisePageName(title: string): string {
   return title
     .replace(/\[/g, '(')
     .replace(/\]/g, ')')
+    .replace(/:\s*/g, ' — ')
     .replace(/\s+/g, ' ')
     .trim()
 }

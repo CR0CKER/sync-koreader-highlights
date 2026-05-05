@@ -23,6 +23,13 @@ export interface KoreaderSidecar {
   authors?: string[]
   language?: string
   description?: string
+  /** Tag-like values from the source file (EPUB <dc:subject> or PDF
+   *  Keywords). Each entry is one tag. KOReader/Calibre separate them
+   *  with `;` or `,` in the raw doc_props string. */
+  keywords?: string[]
+  /** Series name (e.g. "Foundation Trilogy") if the source file
+   *  carried <calibre:series> or equivalent. */
+  series?: string
   /**
    * KOReader's content-derived fingerprint. Stable across file moves and Calibre id changes.
    * Falls back to docPath when absent on legacy sidecars.
@@ -77,10 +84,28 @@ export function parseSidecar(text: string): KoreaderSidecar | null {
     authors,
     language: stringOrUndefined(docProps.language),
     description: stringOrUndefined(docProps.description),
+    keywords: normaliseTags(docProps.keywords ?? docProps.subject),
+    series: stringOrUndefined(docProps.series),
     partialMd5: stringOrUndefined(raw.partial_md5_checksum),
     docPath: stringOrUndefined(raw.doc_path),
     highlights,
   }
+}
+
+function normaliseTags(value: any): string[] | undefined {
+  if (typeof value !== 'string') return undefined
+  // KOReader stores multiple tags the same way it stores multiple
+  // authors: separated by newlines. The raw Lua source uses the
+  // `\<LF>` line-continuation form, which luaparse may decode either
+  // as a bare newline or leave intact as a backslash-then-newline.
+  // The split below consumes an optional leading backslash so the
+  // tag itself doesn't end with a stray `\`. EPUB/PDF metadata also
+  // uses `;` or `,` as separators.
+  const parts = value
+    .split(/\\?[;,\r\n]+/)
+    .map((s) => s.trim().replace(/\\$/, ''))
+    .filter((s) => s.length > 0)
+  return parts.length > 0 ? parts : undefined
 }
 
 function normaliseAuthors(value: any): string[] | undefined {
