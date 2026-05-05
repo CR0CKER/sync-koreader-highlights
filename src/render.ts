@@ -3,27 +3,31 @@ import Mustache from 'mustache'
 import formatDate from 'date-fns/format'
 import { KoreaderHighlight, KoreaderSidecar } from './sidecar'
 
-export const DEFAULT_BOOK_HEADER_TEMPLATE = `title:: {{title}}
-{{#authors}}authors:: {{authors}}{{/authors}}
-{{#language}}language:: {{language}}{{/language}}
-koreader-id:: {{koreaderId}}
-{{#description}}description:: {{description}}{{/description}}`
+/**
+ * Default empty book-header template: when blank, the plugin uses the
+ * page-level properties path (createPage with structured properties),
+ * which is the safest rendering against arbitrary description content.
+ * If the user fills in a template, an extra block is added at the top
+ * of the page using the rendered text — they take responsibility for
+ * the property syntax.
+ */
+export const DEFAULT_BOOK_HEADER_TEMPLATE = ``
 
-export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `## Highlights — {{kind}} {{date}}`
+export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `Highlights synced from [[KOReader]] on [[{{date}}]]`
 
 /**
- * Highlight block template. The blockquote line is the visible text;
- * the property lines below it become Logseq block properties.
- * `journalDay` is rendered as a [[page-link]] inside the datetime property
- * so Logseq's native backlinks panel surfaces this highlight on the journal
- * page for the day it was made — no extra plugin code needed.
+ * Default highlight-block template. Reproduces the structured-properties
+ * rendering as inline `key:: value` lines so what the user sees in the
+ * settings panel matches what they'd get from the default. The blank
+ * line between blockquote and properties is required by Logseq's
+ * property parser.
  */
 export const DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE = `> {{text}}
 
-{{#page}}page:: {{page}}{{/page}}
+{{#date}}date:: [[{{date}}]]{{/date}}
+{{#dateUpdated}}date-updated:: [[{{dateUpdated}}]]{{/dateUpdated}}
 {{#chapter}}chapter:: {{chapter}}{{/chapter}}
-{{#datetime}}datetime:: [[{{journalDay}}]] {{timeOfDay}}{{/datetime}}
-{{#datetimeUpdated}}datetime-updated:: [[{{journalDayUpdated}}]] {{timeOfDayUpdated}}{{/datetimeUpdated}}`
+{{#page}}page:: {{page}}{{/page}}`
 
 const PAGE_BOOKMARK_PLACEHOLDER = 'Page bookmark'
 
@@ -67,33 +71,78 @@ function timeOfDay(s: string | undefined): string {
   return m ? m[1] : ''
 }
 
-/** Render a single highlight as an IBatchBlock with structured properties. */
+/**
+ * Render a single highlight. Two modes:
+ *  - Template equals the default → use Logseq's structured-properties
+ *    path (block content is just the blockquote, properties are passed
+ *    as `IBatchBlock.properties` so Logseq escapes them safely).
+ *  - Template was customised → render the user's template fully; the
+ *    output is the entire block content including any inline
+ *    `key:: value` property lines the user wrote.
+ */
 export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatchBlock {
   const created = parseKoreaderDatetime(h.datetime)
   const updated = parseKoreaderDatetime(h.datetimeUpdated)
   const text = escapeHighlightText(decodeHtmlEntities(h.text || PAGE_BOOKMARK_PLACEHOLDER))
-  // Property order matters in Logseq's structured-properties API — JS
-  // object insertion order is what the renderer uses. Order requested by
-  // the user: date, chapter, page (most-relevant first).
-  const properties: Record<string, string> = {}
-  if (created) {
-    const day = safeFormat(created, ctx.preferredDateFormat)
-    if (day) properties.date = `[[${day}]]`
-  }
-  if (updated) {
-    const day = safeFormat(updated, ctx.preferredDateFormat)
-    if (day) properties['date-updated'] = `[[${day}]]`
-  }
-  const chapter = sanitisePropertyValue(h.chapter)
-  if (chapter) properties.chapter = chapter
-  const page = sanitisePropertyValue(h.page)
-  if (page) properties.page = page
+  const dateLink = created ? safeFormat(created, ctx.preferredDateFormat) : ''
+  const dateUpdatedLink = updated ? safeFormat(updated, ctx.preferredDateFormat) : ''
+  const chapter = sanitisePropertyValue(h.chapter) ?? ''
+  const page = sanitisePropertyValue(h.page) ?? ''
 
-  const block: IBatchBlock = { content: `> ${text}`, properties }
-  if (h.note) {
-    block.children = [{ content: h.note }]
+  if (templateIsDefault(ctx.templates.highlightBlock, DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE)) {
+    // Property order matters — JS object insertion order drives the API.
+    const properties: Record<string, string> = {}
+    if (dateLink) properties.date = `[[${dateLink}]]`
+    if (dateUpdatedLink) properties['date-updated'] = `[[${dateUpdatedLink}]]`
+    if (chapter) properties.chapter = chapter
+    if (page) properties.page = page
+    const block: IBatchBlock = { content: `> ${text}`, properties }
+    if (h.note) block.children = [{ content: h.note }]
+    return block
   }
+
+  // Custom template path: render text + properties inline.
+  const view = {
+    text,
+    date: dateLink,
+    dateUpdated: dateUpdatedLink,
+    chapter,
+    page,
+    note: h.note ?? '',
+  }
+  const content = renderTemplate(ctx.templates.highlightBlock, view)
+  const block: IBatchBlock = { content }
+  if (h.note) block.children = [{ content: h.note }]
   return block
+}
+
+/**
+ * Optional extra block rendered at the top of a book page when the user
+ * has filled in a non-empty `bookHeaderTemplate`. Returns the rendered
+ * string, or null when the default (empty) template is in effect, in
+ * which case the caller should fall back to page-level properties via
+ * `createPage(name, bookPageProperties(...), …)`.
+ */
+export function renderBookHeaderTemplate(sidecar: KoreaderSidecar, ctx: RenderContext): string | null {
+  const tpl = ctx.templates.bookHeader ?? ''
+  if (tpl.trim() === '') return null
+  const authors = (sidecar.authors ?? []).map((a) => sanitisePropertyValue(a)).filter((a): a is string => !!a)
+  const view = {
+    title: sanitisePropertyValue(sidecar.title) ?? '',
+    authors: authors.join(', '),
+    authorsLinked: authors
+      .map((a) => `[[${a.replace(/\[/g, '(').replace(/\]/g, ')')}]]`)
+      .join(', '),
+    language: sanitisePropertyValue(sidecar.language) ?? '',
+    summary: sanitisePropertyValue(sidecar.description) ?? '',
+    description: sanitisePropertyValue(sidecar.description) ?? '',
+    koreaderId: sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath) ?? '',
+  }
+  return renderTemplate(tpl, view)
+}
+
+function templateIsDefault(actual: string | undefined, defaultTpl: string): boolean {
+  return (actual ?? '').trim() === defaultTpl.trim()
 }
 
 /** Compute the page-level properties for a book page. */
@@ -127,9 +176,12 @@ function renderAuthorsAsWikilinks(authors: string[] | undefined): string | undef
   return links.length > 0 ? links.join(', ') : undefined
 }
 
-export function renderHighlightsHeading(_kind: 'initial sync' | 'sync', ctx: RenderContext, date: Date): string {
-  const day = safeFormat(date, ctx.preferredDateFormat)
-  return `Highlights synced from [[KOReader]] on [[${day}]]`
+export function renderHighlightsHeading(kind: 'initial sync' | 'sync', ctx: RenderContext, date: Date): string {
+  const view = {
+    kind,
+    date: safeFormat(date, ctx.preferredDateFormat),
+  }
+  return renderTemplate(ctx.templates.highlightsHeading || DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE, view)
 }
 
 export function renderHighlightsSection(

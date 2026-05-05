@@ -14,6 +14,7 @@ import {
   bookPageProperties,
   isIndexReceiptHeading,
   parseKoreaderDatetime,
+  renderBookHeaderTemplate,
   renderHighlightsSection,
   renderIndexReceipt,
   renderUpdateSection,
@@ -168,40 +169,60 @@ async function createBookPage(
   syncDate: Date,
 ): Promise<{ pageUuid: string } | null> {
   const pageProps = bookPageProperties(sidecar)
-  let page: any
-  try {
-    // Page-level properties: Logseq stores these as the page's own metadata
-    // and handles all escaping internally. Avoids the indexer-crash class
-    // we'd hit if we authored a "title:: …" header block ourselves.
-    page = await logseq.Editor.createPage(pageName, pageProps, { createFirstBlock: false, redirect: false })
-  } catch (e) {
-    console.error('sync-koreader-highlights: createPage threw for', pageName, e)
-    return null
-  }
+  const customHeader = renderBookHeaderTemplate(sidecar, ctx)
+  // Use page-level properties only when the user is on the default
+  // (empty) book-header template. If they've supplied a custom one,
+  // we'll render it as an in-page block instead and skip page-level
+  // properties to avoid duplication.
+  const initialProps = customHeader === null ? pageProps : {}
+
+  const existingPage = await logseq.Editor.getPage(pageName)
+  let page: any = existingPage
   if (!page) {
-    page = await logseq.Editor.getPage(pageName)
-    if (!page) {
-      console.error('sync-koreader-highlights: createPage and getPage both null for', pageName)
+    try {
+      page = await logseq.Editor.createPage(pageName, initialProps, {
+        createFirstBlock: false,
+        redirect: false,
+      })
+    } catch (e) {
+      console.error('sync-koreader-highlights: createPage threw for', pageName, e)
       return null
     }
-    console.log('sync-koreader-highlights: page already existed, will append:', pageName)
-    // Re-apply page properties in case the page exists but lacks them.
-    for (const [k, v] of Object.entries(pageProps)) {
-      try { await logseq.Editor.upsertBlockProperty(page.uuid, k, v) } catch {}
+  } else {
+    // Page already exists (user-authored, or from a prior plugin run).
+    // Don't overwrite anything: only set page properties that aren't
+    // already present.
+    if (customHeader === null) {
+      for (const [k, v] of Object.entries(pageProps)) {
+        try {
+          const existingValue = await logseq.Editor.getBlockProperty(page.uuid, k)
+          if (existingValue === null || existingValue === undefined || existingValue === '') {
+            await logseq.Editor.upsertBlockProperty(page.uuid, k, v)
+          }
+        } catch (e) {
+          console.warn('sync-koreader-highlights: property merge failed for', pageName, k, e)
+        }
+      }
     }
+    console.log('sync-koreader-highlights: existing page preserved, appending sync content:', pageName)
+  }
+  if (!page) return null
+
+  // Optional header block from the user's template, prepended above
+  // any existing content so it's the first thing readers see.
+  if (customHeader !== null && customHeader.trim().length > 0) {
+    await logseq.Editor.prependBlockInPage(pageName, customHeader)
   }
 
   if (sidecar.highlights.length === 0) {
-    // No content blocks needed for an empty book; the page-level properties
-    // are enough. Avoids creating an empty "## Highlights" heading that
-    // could confuse the indexer.
     return { pageUuid: (page as any).uuid }
   }
 
   const section = renderHighlightsSection(sidecar.highlights, ctx, syncDate, 'initial sync')
-  // Insert the heading first as a top-level page block, then hang highlights
-  // beneath it via a single batched call (insertBatchBlock with the heading's
-  // uuid would require a re-fetch round trip).
+  // Append the highlights heading at the bottom of whatever's on the page.
+  // For brand-new pages this is the first content block; for existing
+  // pages it lands beneath the user's prior content, which is what the
+  // user explicitly asked for.
   const heading = await logseq.Editor.appendBlockInPage(pageName, section.content)
   if (heading && section.children && section.children.length > 0) {
     await logseq.Editor.insertBatchBlock(heading.uuid, section.children, { sibling: false })
@@ -293,9 +314,10 @@ async function writeIndexReceipt(syncDate: Date, fmt: string, result: SyncResult
     )
   }
 
-  // Drop every prior receipt heading so the index page only ever shows
-  // the latest sync. Tolerates both the old "## 📚 Sync …" and the
-  // current "## 📚 Synced on …" shapes for users with stale entries.
+  // Drop every prior receipt heading so the page only ever shows the
+  // latest sync. Tolerates both the old "## 📚 Sync …" and the current
+  // "## 📚 Synced on …" shapes. User-authored content on the page is
+  // left untouched.
   const tree = await safePageBlocks(INDEX_PAGE_NAME)
   if (tree) {
     for (const block of tree) {
@@ -313,8 +335,10 @@ async function writeIndexReceipt(syncDate: Date, fmt: string, result: SyncResult
     newBooks: result.newBooks,
     updatedBooks: result.updatedBooks,
   })
-  // appendBlockInPage doesn't accept children, so insertBatchBlock under a freshly-appended root.
-  const inserted = await logseq.Editor.appendBlockInPage(INDEX_PAGE_NAME, receipt.content)
+  // Prepend the receipt at the top of the page so it sits above any
+  // user-authored content. prependBlockInPage doesn't take children,
+  // so we insert children under the returned UUID afterwards.
+  const inserted = await logseq.Editor.prependBlockInPage(INDEX_PAGE_NAME, receipt.content)
   if (inserted && receipt.children) {
     await logseq.Editor.insertBatchBlock(inserted.uuid, receipt.children, { sibling: false })
   }

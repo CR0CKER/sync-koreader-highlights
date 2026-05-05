@@ -198,9 +198,13 @@ async function bootstrap() {
   })
 
   logseq.App.registerUIItem('toolbar', {
+    // Logseq uses the toolbar key in CSS selectors for the plugin
+    // dropdown's icon lookup; spaces break those selectors and the
+    // entry then renders without an icon. Stick to the
+    // lowercase-hyphen convention used by Readwise et al.
     key: 'sync-koreader-highlights',
     template: `
-      <a data-on-click="syncNow" class="button" title="Sync Koreader Highlights">
+      <a data-on-click="syncNow" class="button" title="Sync KOReader Highlights">
         <i class="ti ti-book"></i>
       </a>
     `,
