@@ -64,6 +64,24 @@ export async function recordHighlightIds(sidecarKey: string, ids: string[]): Pro
   await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: map })
 }
 
+/** Replace (not merge) the recorded highlight ids for one book. Used by
+ *  the rebuild flow so that highlights deleted on the device drop out of
+ *  the dedup map. Pass an empty array to clear the bucket entirely. */
+export async function replaceHighlightIds(sidecarKey: string, ids: string[]): Promise<void> {
+  const map = { ...getHighlightIdsMap() }
+  // Set the previous bucket's keys to null first so Logseq's deep-merge
+  // settings update actually drops them.
+  const oldBucket = map[sidecarKey] ?? {}
+  if (Object.keys(oldBucket).length > 0) {
+    const wipe: Record<string, null> = {}
+    for (const k of Object.keys(oldBucket)) wipe[k] = null
+    await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: { [sidecarKey]: wipe } })
+  }
+  const bucket: Record<string, true> = {}
+  for (const id of ids) bucket[id] = true
+  await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: { [sidecarKey]: bucket } })
+}
+
 export async function clearHighlightIds(): Promise<void> {
   const existing = getHighlightIdsMap()
   const wipe: Record<string, null> = {}

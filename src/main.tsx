@@ -1,11 +1,11 @@
 import '@logseq/libs'
 import { SettingSchemaDesc } from '@logseq/libs/dist/LSPlugin'
-import React, { useCallback, useEffect, useState } from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
+import { del as idbDel, get as idbGet, set as idbSet } from 'idb-keyval'
 import { DEFAULT_TEMPLATES, Templates } from './render'
 import { INDEX_PAGE_NAME, resetSyncState, runSync } from './sync'
-import { getBookIdsMap, getLastSync } from './storage'
+import { getBookIdsMap } from './storage'
+
+const PICKER_HANDLE_KEY = 'sync-koreader-highlights:directoryHandle'
 
 const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   {
@@ -18,30 +18,37 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   {
     key: 'autoSyncOnLaunch',
     title: 'Auto-sync on Logseq launch',
-    description: 'Run a sync once shortly after Logseq starts. Off by default.',
+    description: 'Run a sync once shortly after Logseq starts.',
     type: 'boolean',
     default: false,
   },
   {
+    key: 'autoSyncIntervalMinutes',
+    title: 'Auto-sync interval (minutes)',
+    description: 'Run a sync automatically every N minutes. Set to 0 to disable. Note: each automatic sync only runs if a directory was previously remembered (otherwise it would prompt for the picker, which is disruptive).',
+    type: 'number',
+    default: 0,
+  },
+  {
     key: 'bookHeaderTemplate',
-    title: 'Book page header template (Mustache)',
-    description: 'Override the default header rendered at the top of each book page. Leave blank to use the default.',
+    title: 'Book page header template (Mustache, advanced)',
+    description: 'Reserved for future use. Leave blank to use the default rendering. Currently inert — book pages render via Logseq\'s structured properties API.',
     type: 'string',
     inputAs: 'textarea',
     default: '',
   },
   {
     key: 'highlightsHeadingTemplate',
-    title: 'Highlights section heading template (Mustache)',
-    description: 'Override the default heading rendered above each batch of highlights. Leave blank to use the default.',
+    title: 'Highlights section heading template (Mustache, advanced)',
+    description: 'Reserved for future use. Leave blank to use the default rendering.',
     type: 'string',
     inputAs: 'textarea',
     default: '',
   },
   {
     key: 'highlightBlockTemplate',
-    title: 'Highlight block template (Mustache)',
-    description: 'Override the default rendering of each highlight. Leave blank to use the default.',
+    title: 'Highlight block template (Mustache, advanced)',
+    description: 'Reserved for future use. Leave blank to use the default rendering.',
     type: 'string',
     inputAs: 'textarea',
     default: '',
@@ -57,32 +64,61 @@ function loadTemplates(): Templates {
   }
 }
 
-async function saveTemplates(t: Templates): Promise<void> {
-  await logseq.updateSettings({
-    bookHeaderTemplate: t.bookHeader === DEFAULT_TEMPLATES.bookHeader ? '' : t.bookHeader,
-    highlightsHeadingTemplate: t.highlightsHeading === DEFAULT_TEMPLATES.highlightsHeading ? '' : t.highlightsHeading,
-    highlightBlockTemplate: t.highlightBlock === DEFAULT_TEMPLATES.highlightBlock ? '' : t.highlightBlock,
-  })
+// In-memory cache populated from IndexedDB on bootstrap and on every fresh
+// pick. FileSystemDirectoryHandle is structured-cloneable, so it survives
+// across plugin reloads (and Logseq restarts) when persisted to IDB.
+const pickerCache: { handle: any | null } = { handle: null }
+
+async function loadCachedHandle(): Promise<void> {
+  try {
+    const handle = await idbGet(PICKER_HANDLE_KEY)
+    if (handle) {
+      pickerCache.handle = handle
+      console.log('sync-koreader-highlights: restored cached directory handle:', handle.name)
+    }
+  } catch (e) {
+    console.warn('sync-koreader-highlights: failed to read cached directory handle from IDB', e)
+  }
 }
 
-interface PickerCache {
-  handle: any | null
+async function persistHandle(handle: any): Promise<void> {
+  try {
+    await idbSet(PICKER_HANDLE_KEY, handle)
+  } catch (e) {
+    console.warn('sync-koreader-highlights: failed to persist directory handle to IDB', e)
+  }
 }
-const pickerCache: PickerCache = { handle: null }
 
-async function pickDirectory(): Promise<any | null> {
+async function clearCachedHandle(): Promise<void> {
+  pickerCache.handle = null
+  try { await idbDel(PICKER_HANDLE_KEY) } catch {}
+}
+
+async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
   const remember = !!logseq.settings?.rememberDirectory
   if (remember && pickerCache.handle) {
     try {
-      const perm = await pickerCache.handle.queryPermission?.({})
+      const perm = await pickerCache.handle.queryPermission?.({ mode: 'read' })
+      console.log('sync-koreader-highlights: cached handle permission =', perm, 'allowPrompt=', allowPrompt)
       if (perm === 'granted') return pickerCache.handle
-    } catch {
-      // fall through to picker
+      if (!allowPrompt) {
+        // requestPermission requires user activation; calling it from a
+        // background timer or launch hook throws "User activation is required".
+        // Defer to the next time the user clicks the toolbar.
+        return null
+      }
+      const granted = await pickerCache.handle.requestPermission?.({ mode: 'read' })
+      console.log('sync-koreader-highlights: requestPermission =', granted)
+      if (granted === 'granted') return pickerCache.handle
+    } catch (e) {
+      console.warn('sync-koreader-highlights: cached handle permission check failed', e)
     }
   }
+  if (!allowPrompt) return null
   try {
     const handle = await window.showDirectoryPicker()
-    if (remember) pickerCache.handle = handle
+    pickerCache.handle = handle
+    if (remember) await persistHandle(handle)
     return handle
   } catch (e) {
     console.warn('sync-koreader-highlights: directory picker cancelled', e)
@@ -90,129 +126,201 @@ async function pickDirectory(): Promise<any | null> {
   }
 }
 
-function Root() {
-  const [visible, setVisible] = useState(false)
-  const [templates, setTemplates] = useState<Templates>(loadTemplates())
-  const [lastSync, setLastSync] = useState<string | undefined>(getLastSync())
+let syncInFlight = false
 
-  useEffect(() => {
-    const onShow = () => { setTemplates(loadTemplates()); setLastSync(getLastSync()); setVisible(true) }
-    const onHide = () => setVisible(false)
-    ;(window as any).__skh_show = onShow
-    ;(window as any).__skh_hide = onHide
-    return () => {
-      delete (window as any).__skh_show
-      delete (window as any).__skh_hide
+async function syncNow(allowPrompt: boolean): Promise<void> {
+  if (syncInFlight) {
+    await logseq.UI.showMsg('Sync Koreader Highlights: a sync is already running.', 'warning')
+    return
+  }
+  syncInFlight = true
+  try {
+    const handle = await pickDirectory(allowPrompt)
+    if (!handle) {
+      if (allowPrompt) await logseq.UI.showMsg('Sync Koreader Highlights: directory not selected.', 'warning')
+      return
     }
-  }, [])
-
-  const handleSync = useCallback(async (onProgress: (msg: string) => void) => {
-    onProgress('Choose your KOReader directory…')
-    const handle = await pickDirectory()
-    if (!handle) { onProgress('Cancelled.'); return }
-
+    await logseq.UI.showMsg('Sync Koreader Highlights: starting…', 'info')
     const info = await logseq.App.getUserConfigs()
     const result = await runSync({
       directoryHandle: handle,
       preferredDateFormat: info.preferredDateFormat,
       templates: loadTemplates(),
-      onProgress,
+      onProgress: (msg) => console.log('sync-koreader-highlights:', msg),
     })
-    setLastSync(getLastSync())
-
+    const newHighlightCount = result.updatedBooks.reduce((a, b) => a + b.addedCount, 0)
     const summary =
-      `Done — ${result.newBooks.length} new book(s), ` +
-      `${result.updatedBooks.reduce((a, b) => a + b.addedCount, 0)} new highlight(s), ` +
+      `Sync done — ${result.newBooks.length} new book(s), ` +
+      `${newHighlightCount} new highlight(s), ` +
       `${result.skippedStubs} stub(s) skipped` +
       (result.errors.length > 0 ? `, ${result.errors.length} error(s) (see console)` : '.')
-    onProgress(summary)
     await logseq.UI.showMsg(summary, result.errors.length > 0 ? 'warning' : 'success')
-  }, [])
-
-  const handleReset = useCallback(async (alsoDeletePages: boolean) => {
-    if (alsoDeletePages) {
-      const ids = getBookIdsMap()
-      for (const entry of Object.values(ids)) {
-        try {
-          await logseq.Editor.deletePage(entry.title)
-        } catch (e) {
-          console.warn('sync-koreader-highlights: deletePage failed for', entry.title, e)
-        }
-      }
-      try {
-        await logseq.Editor.deletePage(INDEX_PAGE_NAME)
-      } catch (e) {
-        console.warn('sync-koreader-highlights: deletePage failed for index', e)
-      }
-    }
-    await resetSyncState()
-    await logseq.UI.showMsg('Sync state reset.', 'success')
-  }, [])
-
-  const handleSaveTemplates = useCallback(async (t: Templates) => {
-    await saveTemplates(t)
-    setTemplates(t)
-  }, [])
-
-  return (
-    <App
-      visible={visible}
-      onClose={() => { logseq.hideMainUI(); setVisible(false) }}
-      onSync={handleSync}
-      onReset={handleReset}
-      templates={templates}
-      onSaveTemplates={handleSaveTemplates}
-      lastSync={lastSync}
-    />
-  )
+  } catch (e: any) {
+    console.error('sync-koreader-highlights: sync failed', e)
+    await logseq.UI.showMsg(`Sync failed: ${e?.message ?? e}`, 'error')
+  } finally {
+    syncInFlight = false
+  }
 }
 
-function bootstrap() {
+let intervalHandle: number | null = null
+
+function applyAutoSyncInterval(): void {
+  if (intervalHandle !== null) {
+    clearInterval(intervalHandle)
+    intervalHandle = null
+  }
+  const minutes = Number(logseq.settings?.autoSyncIntervalMinutes ?? 0)
+  if (!Number.isFinite(minutes) || minutes <= 0) return
+  const ms = Math.max(1, Math.floor(minutes)) * 60 * 1000
+  intervalHandle = window.setInterval(() => {
+    // Background tick: never prompt for a directory, just no-op if none cached.
+    void syncNow(false)
+  }, ms)
+}
+
+async function bootstrap() {
   console.log('sync-koreader-highlights: main loaded')
   logseq.useSettingsSchema(SETTINGS_SCHEMA)
 
-  const container = document.getElementById('app')!
-  ReactDOM.createRoot(container).render(<Root />)
+  await loadCachedHandle()
 
-  logseq.provideModel({
-    showSyncKoreaderUI() {
-      logseq.showMainUI()
-      ;(window as any).__skh_show?.()
-    },
+  logseq.onSettingsChanged((newSettings: any, oldSettings: any) => {
+    applyAutoSyncInterval()
+    // Clearing "Remember Koreader directory" flushes the cached handle.
+    if (oldSettings?.rememberDirectory && !newSettings?.rememberDirectory) {
+      void clearCachedHandle()
+    }
   })
 
-  logseq.setMainUIInlineStyle({ zIndex: 11 })
+  logseq.provideModel({
+    syncNow() { void syncNow(true) },
+  })
 
   logseq.App.registerUIItem('toolbar', {
     key: 'sync-koreader-highlights',
     template: `
-      <a data-on-click="showSyncKoreaderUI" class="button" title="Sync Koreader Highlights">
+      <a data-on-click="syncNow" class="button" title="Sync Koreader Highlights">
         <i class="ti ti-book"></i>
       </a>
     `,
   })
 
   logseq.App.registerCommandPalette(
-    { key: 'sync-koreader-highlights-open', label: 'Sync Koreader Highlights: open' },
-    () => {
-      logseq.showMainUI()
-      ;(window as any).__skh_show?.()
-    },
+    { key: 'sync-koreader-highlights-sync-now', label: 'Sync Koreader Highlights: sync now' },
+    () => { void syncNow(true) },
   )
 
   logseq.App.registerCommandPalette(
     { key: 'sync-koreader-highlights-reset', label: 'Sync Koreader Highlights: reset sync state' },
     async () => {
       await resetSyncState()
-      await logseq.UI.showMsg('Sync state reset.', 'success')
+      await clearCachedHandle()
+      await logseq.UI.showMsg('Sync Koreader Highlights: sync state reset.', 'success')
     },
   )
 
+  logseq.App.registerCommandPalette(
+    { key: 'sync-koreader-highlights-reset-and-delete', label: 'Sync Koreader Highlights: reset and delete all book pages' },
+    async () => {
+      const ids = getBookIdsMap()
+      for (const entry of Object.values(ids)) {
+        try { await logseq.Editor.deletePage(entry.title) } catch (e) {
+          console.warn('sync-koreader-highlights: deletePage failed for', entry.title, e)
+        }
+      }
+      try { await logseq.Editor.deletePage(INDEX_PAGE_NAME) } catch (e) {
+        console.warn('sync-koreader-highlights: deletePage failed for index', e)
+      }
+      await resetSyncState()
+      await clearCachedHandle()
+      await logseq.UI.showMsg('Sync Koreader Highlights: reset complete; book pages deleted.', 'success')
+    },
+  )
+
+  logseq.App.registerCommandPalette(
+    { key: 'sync-koreader-highlights-forget-directory', label: 'Sync Koreader Highlights: forget remembered directory' },
+    async () => {
+      await clearCachedHandle()
+      await logseq.UI.showMsg('Sync Koreader Highlights: directory cache cleared.', 'success')
+    },
+  )
+
+  applyAutoSyncInterval()
+
   if (logseq.settings?.autoSyncOnLaunch) {
-    setTimeout(() => {
-      logseq.showMainUI()
-      ;(window as any).__skh_show?.()
-    }, 2000)
+    console.log('sync-koreader-highlights: autoSyncOnLaunch on; scheduling launch sync')
+    void scheduleLaunchSync()
+  }
+}
+
+/**
+ * Run the launch sync as soon as it can. Three cases:
+ *  1. No cached handle yet → silently no-op (the user hasn't picked a
+ *     directory, can't auto-sync without one).
+ *  2. Cached handle, permission already granted → sync immediately.
+ *  3. Cached handle, permission lapsed (typical after a Logseq restart)
+ *     → wait for the next user activation in the Logseq window, then
+ *     call requestPermission inside that activation context. Chromium
+ *     usually re-grants silently if the user previously approved the
+ *     handle, no dialog. Sync fires the instant permission flips to
+ *     "granted".
+ */
+async function scheduleLaunchSync(): Promise<void> {
+  // Tiny delay so the rest of Logseq's UI has settled and toasts are visible.
+  await new Promise((r) => setTimeout(r, 1500))
+  const handle = pickerCache.handle
+  if (!handle) {
+    console.log('sync-koreader-highlights: launch sync skipped — no cached directory handle')
+    return
+  }
+  try {
+    const perm = await handle.queryPermission?.({ mode: 'read' })
+    console.log('sync-koreader-highlights: launch handle permission =', perm)
+    if (perm === 'granted') {
+      void syncNow(false)
+      return
+    }
+  } catch (e) {
+    console.warn('sync-koreader-highlights: launch queryPermission threw', e)
+    return
+  }
+
+  // Permission has lapsed. Defer the sync to the next user activation.
+  console.log('sync-koreader-highlights: deferring launch sync to next user activation')
+  let triggered = false
+  const onActivation = async () => {
+    if (triggered) return
+    triggered = true
+    try {
+      const granted = await handle.requestPermission?.({ mode: 'read' })
+      console.log('sync-koreader-highlights: deferred requestPermission =', granted)
+      if (granted === 'granted') {
+        void syncNow(false)
+      }
+    } catch (e) {
+      console.warn('sync-koreader-highlights: deferred requestPermission threw', e)
+    } finally {
+      detach()
+    }
+  }
+  const detach = () => {
+    window.removeEventListener('pointerdown', onActivation, true)
+    window.removeEventListener('keydown', onActivation, true)
+    parent?.removeEventListener?.('pointerdown', onActivation, true)
+    parent?.removeEventListener?.('keydown', onActivation, true)
+  }
+  // Listen on both this iframe's window (the plugin's own UI surface,
+  // largely empty since we removed the modal) and the parent window
+  // (the Logseq main UI, where actual user clicks happen).
+  window.addEventListener('pointerdown', onActivation, true)
+  window.addEventListener('keydown', onActivation, true)
+  try {
+    window.parent?.addEventListener('pointerdown', onActivation, true)
+    window.parent?.addEventListener('keydown', onActivation, true)
+  } catch {
+    // Cross-origin guards may block this; the in-frame listener still works
+    // because Logseq forwards toolbar/command events into our context.
   }
 }
 

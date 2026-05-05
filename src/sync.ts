@@ -12,8 +12,8 @@ import {
   RenderContext,
   Templates,
   bookPageProperties,
+  isIndexReceiptHeading,
   parseKoreaderDatetime,
-  renderHighlight,
   renderHighlightsSection,
   renderIndexReceipt,
   renderUpdateSection,
@@ -28,6 +28,7 @@ import {
   getHighlightIdsMap,
   getLastHighlightDatetimeMap,
   recordHighlightIds,
+  replaceHighlightIds,
   setBookId,
   setLastHighlightDatetime,
   setLastSync,
@@ -128,19 +129,23 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
         }
       } else {
         const known = highlightIds[key] ?? {}
-        const newHighlights = sidecar.highlights.filter((h) => !known[h.id])
-        console.log('sync-koreader-highlights: existing book', existing.title, 'pageUuid=', existing.pageUuid, 'newHighlights=', newHighlights.length)
-        if (newHighlights.length === 0) continue
+        const currentIds = new Set(sidecar.highlights.map((h) => h.id))
+        const newCount = sidecar.highlights.filter((h) => !known[h.id]).length
+        const removedCount = Object.keys(known).filter((id) => !currentIds.has(id)).length
+        console.log('sync-koreader-highlights: existing book', existing.title, 'new=', newCount, 'removed=', removedCount)
+        if (newCount === 0 && removedCount === 0) continue
 
-        const appended = await appendHighlights(existing, sidecar, newHighlights, ctx, syncDate)
-        console.log('sync-koreader-highlights: appendHighlights →', appended)
-        if (appended) {
-          await recordHighlightIds(key, newHighlights.map((h) => h.id))
-          const maxDt = maxDatetime(newHighlights)
+        const replaced = await rebuildHighlightsSection(existing, sidecar, ctx, syncDate)
+        console.log('sync-koreader-highlights: rebuildHighlightsSection →', replaced)
+        if (replaced) {
+          // Replace the recorded id set (not append) so that highlights deleted
+          // on the device drop out of the dedup map too.
+          await replaceHighlightIds(key, sidecar.highlights.map((h) => h.id))
+          const maxDt = maxDatetime(sidecar.highlights)
           if (maxDt) await setLastHighlightDatetime(key, maxDt)
-          result.updatedBooks.push({ pageName: existing.title, addedCount: newHighlights.length })
+          result.updatedBooks.push({ pageName: existing.title, addedCount: newCount })
         } else {
-          result.errors.push(`appendHighlights failed: ${existing.title}`)
+          result.errors.push(`rebuildHighlightsSection failed: ${existing.title}`)
         }
       }
     } catch (e) {
@@ -204,16 +209,23 @@ async function createBookPage(
   return { pageUuid: (page as any).uuid }
 }
 
-async function appendHighlights(
+/**
+ * Replace the existing "## Highlights synced from …" block (and all its
+ * children) with a fresh one containing every highlight currently in the
+ * sidecar. The dated heading is rewritten to match the current sync time.
+ *
+ * This is destructive: any user edits to highlight blocks under the
+ * heading get blown away on the next sync. The user has explicitly
+ * opted into this behaviour as the simplest way to keep the page in
+ * lockstep with KOReader (and to remove highlights deleted on the
+ * device, which the append-only model couldn't do).
+ */
+async function rebuildHighlightsSection(
   existing: BookIdEntry,
   sidecar: KoreaderSidecar,
-  newHighlights: KoreaderHighlight[],
   ctx: RenderContext,
   syncDate: Date,
 ): Promise<boolean> {
-  // Try by saved UUID, then by title (graph re-index recovery). If neither
-  // resolves to a page with blocks, the page was likely deleted out from
-  // under us — recreate it from scratch instead of dropping the highlights.
   let pageBlocks = await safePageBlocks(existing.pageUuid)
   const pageName = existing.title
   if (!pageBlocks || pageBlocks.length === 0) {
@@ -225,19 +237,40 @@ async function appendHighlights(
     return created !== null
   }
 
-  // Reuse an existing "## Highlights" block if one is present so the page
-  // never grows duplicate headings on incremental syncs. Otherwise create
-  // one as a fresh top-level block.
-  const heading = pageBlocks.find((b) => (b.content ?? '').trim() === '## Highlights')
-  const renderedChildren = newHighlights.map((h) => renderHighlight(h, ctx))
-  if (heading) {
-    await logseq.Editor.insertBatchBlock(heading.uuid, renderedChildren, { sibling: false })
+  // Drop every existing "## Highlights synced from …" subtree. There
+  // should normally be only one, but tolerate stale duplicates from a
+  // previous build that wrote per-sync siblings.
+  for (const block of pageBlocks) {
+    if (isHighlightsHeading(block.content)) {
+      try { await logseq.Editor.removeBlock(block.uuid) } catch (e) {
+        console.warn('sync-koreader-highlights: removeBlock failed for', block.uuid, e)
+      }
+    }
+  }
+
+  if (sidecar.highlights.length === 0) return true
+
+  const refreshed = await safePageBlocks(existing.pageUuid) ?? await safePageBlocks(existing.title)
+  if (!refreshed || refreshed.length === 0) {
+    // Page now has no blocks — append directly to the page.
+    const section = renderUpdateSection(sidecar.highlights, ctx, syncDate)
+    const heading = await logseq.Editor.appendBlockInPage(pageName, section.content)
+    if (heading && section.children) {
+      await logseq.Editor.insertBatchBlock(heading.uuid, section.children, { sibling: false })
+    }
     return true
   }
-  const section = renderUpdateSection(newHighlights, ctx, syncDate)
-  const last = pageBlocks[pageBlocks.length - 1]
+  const section = renderUpdateSection(sidecar.highlights, ctx, syncDate)
+  const last = refreshed[refreshed.length - 1]
   await logseq.Editor.insertBatchBlock(last.uuid, [section], { sibling: true })
   return true
+}
+
+function isHighlightsHeading(content: string | undefined): boolean {
+  // Tolerate the leading `##` prefix from earlier builds so re-syncs of
+  // pages created before this change still find and replace their old
+  // heading.
+  return !!content && /^(?:#+\s+)?Highlights synced from\b/.test(content.trim())
 }
 
 async function safePageBlocks(idOrName: string): Promise<BlockEntity[] | null> {
@@ -259,6 +292,21 @@ async function writeIndexReceipt(syncDate: Date, fmt: string, result: SyncResult
       { createFirstBlock: false, redirect: false },
     )
   }
+
+  // Drop every prior receipt heading so the index page only ever shows
+  // the latest sync. Tolerates both the old "## 📚 Sync …" and the
+  // current "## 📚 Synced on …" shapes for users with stale entries.
+  const tree = await safePageBlocks(INDEX_PAGE_NAME)
+  if (tree) {
+    for (const block of tree) {
+      if (isIndexReceiptHeading(block.content)) {
+        try { await logseq.Editor.removeBlock(block.uuid) } catch (e) {
+          console.warn('sync-koreader-highlights: index receipt removeBlock failed', block.uuid, e)
+        }
+      }
+    }
+  }
+
   const receipt = renderIndexReceipt({
     syncDate,
     preferredDateFormat: fmt,

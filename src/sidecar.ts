@@ -17,7 +17,10 @@ export interface KoreaderHighlight {
 
 export interface KoreaderSidecar {
   title: string
-  authors?: string
+  /** Each entry is one author. KOReader separates authors with "\n" in the
+   *  raw Lua string; individual author names may themselves contain commas
+   *  ("Last, First"), so callers must not naively split on commas. */
+  authors?: string[]
   language?: string
   description?: string
   /**
@@ -80,10 +83,13 @@ export function parseSidecar(text: string): KoreaderSidecar | null {
   }
 }
 
-function normaliseAuthors(value: any): string | undefined {
+function normaliseAuthors(value: any): string[] | undefined {
   if (typeof value !== 'string') return undefined
-  const cleaned = value.replace(/\\\n/g, ', ').trim()
-  return cleaned || undefined
+  const parts = value
+    .split(/\\?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  return parts.length > 0 ? parts : undefined
 }
 
 function stringOrUndefined(value: any): string | undefined {

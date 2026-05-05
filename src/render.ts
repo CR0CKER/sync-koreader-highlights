@@ -72,12 +72,10 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
   const created = parseKoreaderDatetime(h.datetime)
   const updated = parseKoreaderDatetime(h.datetimeUpdated)
   const text = escapeHighlightText(decodeHtmlEntities(h.text || PAGE_BOOKMARK_PLACEHOLDER))
+  // Property order matters in Logseq's structured-properties API — JS
+  // object insertion order is what the renderer uses. Order requested by
+  // the user: date, chapter, page (most-relevant first).
   const properties: Record<string, string> = {}
-
-  const page = sanitisePropertyValue(h.page)
-  if (page) properties.page = page
-  const chapter = sanitisePropertyValue(h.chapter)
-  if (chapter) properties.chapter = chapter
   if (created) {
     const day = safeFormat(created, ctx.preferredDateFormat)
     if (day) properties.date = `[[${day}]]`
@@ -86,6 +84,10 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
     const day = safeFormat(updated, ctx.preferredDateFormat)
     if (day) properties['date-updated'] = `[[${day}]]`
   }
+  const chapter = sanitisePropertyValue(h.chapter)
+  if (chapter) properties.chapter = chapter
+  const page = sanitisePropertyValue(h.page)
+  if (page) properties.page = page
 
   const block: IBatchBlock = { content: `> ${text}`, properties }
   if (h.note) {
@@ -98,20 +100,36 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
 export function bookPageProperties(sidecar: KoreaderSidecar): Record<string, string> {
   const out: Record<string, string> = {}
   const title = sanitisePropertyValue(sidecar.title)
-  if (title) out.title = title
-  const authors = sanitisePropertyValue(sidecar.authors)
-  if (authors) out.authors = authors
-  const language = sanitisePropertyValue(sidecar.language)
-  if (language) out.language = language
-  const koreaderId = sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath)
-  if (koreaderId) out['koreader-id'] = koreaderId
-  const description = truncate(sanitisePropertyValue(sidecar.description))
-  if (description) out.description = description
+  if (title) out['full-title'] = title
+  const authorsLink = renderAuthorsAsWikilinks(sidecar.authors)
+  if (authorsLink) out.author = authorsLink
+  const summary = sanitisePropertyValue(sidecar.description)
+  if (summary) out.summary = summary
+  // koreader-id intentionally omitted from page properties — it's
+  // human-irrelevant. The plugin's bookIdsMap holds the same identifier
+  // internally, so re-syncs still dedup correctly.
   return out
 }
 
-export function renderHighlightsHeading(_kind: 'initial sync' | 'sync', _ctx: RenderContext, _date: Date): string {
-  return '## Highlights'
+/**
+ * Render each author as a separate Logseq wikilink so clicking any one
+ * opens that author's page (and Logseq's backlink panel collates every
+ * book by that author). Multiple authors join with ", " between links.
+ * `[`/`]` inside an author name would break the wikilink delimiters and
+ * are replaced with `(`/`)` — same pattern as page-name sanitisation.
+ */
+function renderAuthorsAsWikilinks(authors: string[] | undefined): string | undefined {
+  if (!authors || authors.length === 0) return undefined
+  const links = authors
+    .map((a) => sanitisePropertyValue(a))
+    .filter((a): a is string => !!a)
+    .map((a) => `[[${a.replace(/\[/g, '(').replace(/\]/g, ')')}]]`)
+  return links.length > 0 ? links.join(', ') : undefined
+}
+
+export function renderHighlightsHeading(_kind: 'initial sync' | 'sync', ctx: RenderContext, date: Date): string {
+  const day = safeFormat(date, ctx.preferredDateFormat)
+  return `Highlights synced from [[KOReader]] on [[${day}]]`
 }
 
 export function renderHighlightsSection(
@@ -170,9 +188,18 @@ export function renderIndexReceipt(input: IndexReceiptInput): IBatchBlock {
   }
 
   return {
-    content: `# 📚 Sync ${dateStr} ${timeStr}`,
+    content: `## 📚 Synced on ${dateStr} at ${timeStr}`,
     children,
   }
+}
+
+/**
+ * Match any of the receipt-heading shapes we have ever written to the
+ * index page. Used by the index-page rebuilder to drop the previous
+ * entry before writing a fresh one.
+ */
+export function isIndexReceiptHeading(content: string | undefined): boolean {
+  return !!content && /^##\s+📚\s+(?:Sync\b|Synced on\b)/.test(content.trim())
 }
 
 /**
