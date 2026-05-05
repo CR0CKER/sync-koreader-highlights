@@ -29,7 +29,7 @@ export const DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE = `> {{text}}
 {{#chapter}}chapter:: {{chapter}}{{/chapter}}
 {{#page}}page:: {{page}}{{/page}}`
 
-const PAGE_BOOKMARK_PLACEHOLDER = 'Page bookmark'
+const PAGE_BOOKMARK_PLACEHOLDER = 'Bookmarked'
 
 export interface Templates {
   bookHeader: string
@@ -72,47 +72,85 @@ function timeOfDay(s: string | undefined): string {
 }
 
 /**
- * Render a single highlight. Two modes:
- *  - Template equals the default → use Logseq's structured-properties
- *    path (block content is just the blockquote, properties are passed
- *    as `IBatchBlock.properties` so Logseq escapes them safely).
- *  - Template was customised → render the user's template fully; the
- *    output is the entire block content including any inline
- *    `key:: value` property lines the user wrote.
+ * Render a single highlight, note, or bookmark. KOReader keeps all
+ * three in the same `annotations` table; we distinguish them by which
+ * fields are populated:
+ *  - `text` non-empty               → highlight (optional `note` as child)
+ *  - `text` empty, `note` non-empty → standalone note (no blockquote)
+ *  - both empty                     → page bookmark
+ *
+ * Two rendering modes:
+ *  - Default highlight-block template → Logseq structured-properties
+ *    path (block content is the body, properties are passed as
+ *    `IBatchBlock.properties` for safe escaping).
+ *  - Custom template → render the user's template fully; the output
+ *    is the entire block content including any inline `key:: value`
+ *    property lines.
  */
 export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatchBlock {
   const created = parseKoreaderDatetime(h.datetime)
   const updated = parseKoreaderDatetime(h.datetimeUpdated)
-  const text = escapeHighlightText(decodeHtmlEntities(h.text || PAGE_BOOKMARK_PLACEHOLDER))
+  const rawText = h.text ?? ''
+  const rawNote = h.note ?? ''
+  const decodedText = escapeHighlightText(decodeHtmlEntities(rawText))
+  const decodedNote = decodeHtmlEntities(rawNote).trim()
   const dateLink = created ? safeFormat(created, ctx.preferredDateFormat) : ''
   const dateUpdatedLink = updated ? safeFormat(updated, ctx.preferredDateFormat) : ''
   const chapter = sanitisePropertyValue(h.chapter) ?? ''
   const page = sanitisePropertyValue(h.page) ?? ''
 
+  // Body shape and child note depend on what KOReader stored.
+  let bodyText: string
+  let attachNoteChild = false
+  if (decodedText) {
+    // Highlight (with or without an attached note)
+    bodyText = `> ${decodedText}`
+    attachNoteChild = decodedNote.length > 0
+  } else if (decodedNote) {
+    // Standalone note: surface the note as the block body itself.
+    bodyText = decodedNote
+  } else {
+    // Bare page bookmark.
+    bodyText = `> ${PAGE_BOOKMARK_PLACEHOLDER}`
+  }
+
+  const isStandaloneNote = !decodedText && !!decodedNote
+
   if (templateIsDefault(ctx.templates.highlightBlock, DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE)) {
     // Property order matters — JS object insertion order drives the API.
     const properties: Record<string, string> = {}
     if (dateLink) properties.date = `[[${dateLink}]]`
-    if (dateUpdatedLink) properties['date-updated'] = `[[${dateUpdatedLink}]]`
+    // Standalone notes don't get a `date-updated` property: KOReader's
+    // own datetime_updated semantics for notes are ambiguous and the
+    // user finds the extra property noisy on note-only blocks.
+    if (dateUpdatedLink && !isStandaloneNote) properties['date-updated'] = `[[${dateUpdatedLink}]]`
     if (chapter) properties.chapter = chapter
     if (page) properties.page = page
-    const block: IBatchBlock = { content: `> ${text}`, properties }
-    if (h.note) block.children = [{ content: h.note }]
+    const block: IBatchBlock = { content: bodyText, properties }
+    if (attachNoteChild) block.children = [{ content: decodedNote }]
     return block
   }
 
-  // Custom template path: render text + properties inline.
+  // Custom template path: render text + properties inline. The `text`
+  // variable carries the body chosen above (with `> ` prefix for
+  // highlights/bookmarks, plain for notes). dateUpdated is suppressed
+  // on standalone notes so the user's template can use a {{#dateUpdated}}
+  // section without ever rendering it on note-only blocks.
   const view = {
-    text,
+    text: bodyText.replace(/^>\s+/, ''),
+    body: bodyText,
     date: dateLink,
-    dateUpdated: dateUpdatedLink,
+    dateUpdated: isStandaloneNote ? '' : dateUpdatedLink,
     chapter,
     page,
-    note: h.note ?? '',
+    note: decodedNote,
+    isNote: isStandaloneNote,
+    isBookmark: !decodedText && !decodedNote,
+    isHighlight: !!decodedText,
   }
   const content = renderTemplate(ctx.templates.highlightBlock, view)
   const block: IBatchBlock = { content }
-  if (h.note) block.children = [{ content: h.note }]
+  if (attachNoteChild) block.children = [{ content: decodedNote }]
   return block
 }
 
@@ -149,7 +187,7 @@ function templateIsDefault(actual: string | undefined, defaultTpl: string): bool
 export function bookPageProperties(sidecar: KoreaderSidecar): Record<string, string> {
   const out: Record<string, string> = {}
   const title = sanitisePropertyValue(sidecar.title)
-  if (title) out['full-title'] = title
+  if (title) out.title = title
   const authorsLink = renderAuthorsAsWikilinks(sidecar.authors)
   if (authorsLink) out.author = authorsLink
   const summary = sanitisePropertyValue(sidecar.description)
