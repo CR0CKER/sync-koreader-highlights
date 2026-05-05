@@ -1,7 +1,13 @@
 import '@logseq/libs'
 import { SettingSchemaDesc } from '@logseq/libs/dist/LSPlugin'
 import { del as idbDel, get as idbGet, set as idbSet } from 'idb-keyval'
-import { DEFAULT_TEMPLATES, Templates } from './render'
+import {
+  DEFAULT_BOOK_HEADER_TEMPLATE,
+  DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE,
+  DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE,
+  DEFAULT_TEMPLATES,
+  Templates,
+} from './render'
 import { INDEX_PAGE_NAME, resetSyncState, runSync } from './sync'
 import { getBookIdsMap } from './storage'
 
@@ -31,27 +37,39 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   },
   {
     key: 'bookHeaderTemplate',
-    title: 'Book page header template (Mustache, advanced)',
-    description: 'Reserved for future use. Leave blank to use the default rendering. Currently inert — book pages render via Logseq\'s structured properties API.',
+    title: 'Book page header template (Mustache)',
+    description:
+      'Optional Mustache template rendered as an extra block at the top of each book page. ' +
+      'Leave blank to use Logseq\'s page-level properties (full-title / author / summary). ' +
+      'When set, page-level properties are skipped to avoid duplication. ' +
+      'Variables: {{title}}, {{authors}} (comma-joined plain text), {{authorsLinked}} (each as [[wikilink]]), ' +
+      '{{language}}, {{summary}} (alias {{description}}), {{koreaderId}}.',
     type: 'string',
     inputAs: 'textarea',
-    default: '',
+    default: DEFAULT_BOOK_HEADER_TEMPLATE,
   },
   {
     key: 'highlightsHeadingTemplate',
-    title: 'Highlights section heading template (Mustache, advanced)',
-    description: 'Reserved for future use. Leave blank to use the default rendering.',
+    title: 'Highlights section heading template (Mustache)',
+    description:
+      'Mustache template for the heading block above each book\'s highlights. ' +
+      'Re-rendered on every sync so its date stays current. ' +
+      'Variables: {{date}}, {{kind}} ("initial sync" or "sync").',
     type: 'string',
     inputAs: 'textarea',
-    default: '',
+    default: DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE,
   },
   {
     key: 'highlightBlockTemplate',
-    title: 'Highlight block template (Mustache, advanced)',
-    description: 'Reserved for future use. Leave blank to use the default rendering.',
+    title: 'Highlight block template (Mustache)',
+    description:
+      'Mustache template for each highlight block on a book page. ' +
+      'When left at the default, the plugin uses Logseq\'s structured-properties API for safer rendering. ' +
+      'Modify to take full control of the block content (text + inline `key:: value` properties). ' +
+      'Variables: {{text}}, {{date}}, {{dateUpdated}}, {{chapter}}, {{page}}, {{note}}.',
     type: 'string',
     inputAs: 'textarea',
-    default: '',
+    default: DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE,
   },
 ]
 
