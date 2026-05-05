@@ -19,11 +19,11 @@ export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `## Highlights — {{kind}} {
  * page for the day it was made — no extra plugin code needed.
  */
 export const DEFAULT_HIGHLIGHT_BLOCK_TEMPLATE = `> {{text}}
+
 {{#page}}page:: {{page}}{{/page}}
 {{#chapter}}chapter:: {{chapter}}{{/chapter}}
 {{#datetime}}datetime:: [[{{journalDay}}]] {{timeOfDay}}{{/datetime}}
-{{#datetimeUpdated}}datetime-updated:: [[{{journalDayUpdated}}]] {{timeOfDayUpdated}}{{/datetimeUpdated}}
-koreader-highlight-id:: {{id}}`
+{{#datetimeUpdated}}datetime-updated:: [[{{journalDayUpdated}}]] {{timeOfDayUpdated}}{{/datetimeUpdated}}`
 
 const PAGE_BOOKMARK_PLACEHOLDER = 'Page bookmark'
 
@@ -67,64 +67,62 @@ function timeOfDay(s: string | undefined): string {
   return m ? m[1] : ''
 }
 
-/** Render a single highlight as one or more IBatchBlocks (block + optional note child). */
+/** Render a single highlight as an IBatchBlock with structured properties. */
 export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatchBlock {
   const created = parseKoreaderDatetime(h.datetime)
   const updated = parseKoreaderDatetime(h.datetimeUpdated)
+  const text = escapeHighlightText(decodeHtmlEntities(h.text || PAGE_BOOKMARK_PLACEHOLDER))
+  const properties: Record<string, string> = {}
 
-  const view = {
-    text: escapeHighlightText(h.text || PAGE_BOOKMARK_PLACEHOLDER),
-    page: sanitisePropertyValue(h.page),
-    chapter: sanitisePropertyValue(h.chapter),
-    datetime: sanitisePropertyValue(h.datetime),
-    journalDay: safeFormat(created, ctx.preferredDateFormat),
-    timeOfDay: timeOfDay(h.datetime),
-    datetimeUpdated: sanitisePropertyValue(h.datetimeUpdated),
-    journalDayUpdated: safeFormat(updated, ctx.preferredDateFormat),
-    timeOfDayUpdated: timeOfDay(h.datetimeUpdated),
-    id: sanitisePropertyValue(h.id) ?? '',
+  const page = sanitisePropertyValue(h.page)
+  if (page) properties.page = page
+  const chapter = sanitisePropertyValue(h.chapter)
+  if (chapter) properties.chapter = chapter
+  if (created) {
+    const day = safeFormat(created, ctx.preferredDateFormat)
+    if (day) properties.date = `[[${day}]]`
+  }
+  if (updated) {
+    const day = safeFormat(updated, ctx.preferredDateFormat)
+    if (day) properties['date-updated'] = `[[${day}]]`
   }
 
-  const content = renderTemplate(ctx.templates.highlightBlock, view)
-  const block: IBatchBlock = { content }
+  const block: IBatchBlock = { content: `> ${text}`, properties }
   if (h.note) {
     block.children = [{ content: h.note }]
   }
   return block
 }
 
-/** Render the per-book "header" content (title block of the page). */
-export function renderBookHeader(sidecar: KoreaderSidecar, ctx: RenderContext): string {
-  return renderTemplate(ctx.templates.bookHeader, {
-    title: sanitisePropertyValue(sidecar.title) ?? '',
-    authors: sanitisePropertyValue(sidecar.authors) ?? '',
-    language: sanitisePropertyValue(sidecar.language) ?? '',
-    koreaderId: sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath) ?? '',
-    description: sanitisePropertyValue(sidecar.description) ?? '',
-  })
+/** Compute the page-level properties for a book page. */
+export function bookPageProperties(sidecar: KoreaderSidecar): Record<string, string> {
+  const out: Record<string, string> = {}
+  const title = sanitisePropertyValue(sidecar.title)
+  if (title) out.title = title
+  const authors = sanitisePropertyValue(sidecar.authors)
+  if (authors) out.authors = authors
+  const language = sanitisePropertyValue(sidecar.language)
+  if (language) out.language = language
+  const koreaderId = sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath)
+  if (koreaderId) out['koreader-id'] = koreaderId
+  const description = truncate(sanitisePropertyValue(sidecar.description))
+  if (description) out.description = description
+  return out
 }
 
-export interface BookPageBlocks {
-  /** First block on the page: the metadata header. */
-  header: IBatchBlock
-  /** Second block on the page: a "## Highlights — initial sync ..." heading wrapping the highlights. */
-  highlightsSection: IBatchBlock
+export function renderHighlightsHeading(_kind: 'initial sync' | 'sync', _ctx: RenderContext, _date: Date): string {
+  return '## Highlights'
 }
 
-export function renderInitialBookPage(
-  sidecar: KoreaderSidecar,
+export function renderHighlightsSection(
   highlights: KoreaderHighlight[],
   ctx: RenderContext,
   syncDate: Date,
-): BookPageBlocks {
-  const heading = renderTemplate(ctx.templates.highlightsHeading, {
-    kind: 'initial sync',
-    date: safeFormat(syncDate, ctx.preferredDateFormat),
-  })
-  const children = highlights.map((h) => renderHighlight(h, ctx))
+  kind: 'initial sync' | 'sync',
+): IBatchBlock {
   return {
-    header: { content: renderBookHeader(sidecar, ctx) },
-    highlightsSection: { content: heading, children },
+    content: renderHighlightsHeading(kind, ctx, syncDate),
+    children: highlights.map((h) => renderHighlight(h, ctx)),
   }
 }
 
@@ -133,14 +131,7 @@ export function renderUpdateSection(
   ctx: RenderContext,
   syncDate: Date,
 ): IBatchBlock {
-  const heading = renderTemplate(ctx.templates.highlightsHeading, {
-    kind: 'sync',
-    date: safeFormat(syncDate, ctx.preferredDateFormat),
-  })
-  return {
-    content: heading,
-    children: highlights.map((h) => renderHighlight(h, ctx)),
-  }
+  return renderHighlightsSection(highlights, ctx, syncDate, 'sync')
 }
 
 export interface IndexReceiptInput {
@@ -203,15 +194,47 @@ function escapeHighlightText(s: string): string {
  * Make a value safe to use as a Logseq block property value. Empty or
  * unrenderable values become undefined so the surrounding Mustache
  * `{{#var}}…{{/var}}` section drops out entirely.
+ *
+ * Calibre-sourced descriptions are HTML; KOReader stores them verbatim.
+ * Decode common entities, strip tags, and collapse whitespace so they
+ * read as plain text inside Logseq.
  */
 function sanitisePropertyValue(value: any): string | undefined {
   if (value === undefined || value === null) return undefined
   let s = String(value)
+  s = decodeHtmlEntities(s)
+  s = stripHtmlTags(s)
   // Strip newlines (multi-line property values confuse Logseq's parser),
   // collapse property-syntax sequences ("key:: value" inside the value),
   // and trim outer whitespace.
-  s = s.replace(/\r?\n/g, ' ').replace(/::/g, ':').trim()
+  s = s.replace(/\r?\n+/g, ' ').replace(/::/g, ':').replace(/\s+/g, ' ').trim()
   return s.length > 0 ? s : undefined
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ldquo: '“', rdquo: '”', lsquo: '‘', rsquo: '’',
+  ndash: '–', mdash: '—', hellip: '…',
+  auml: 'ä', ouml: 'ö', uuml: 'ü', szlig: 'ß',
+  Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü',
+  eacute: 'é', egrave: 'è', aacute: 'á', iacute: 'í',
+  oacute: 'ó', uacute: 'ú', ntilde: 'ñ', ccedil: 'ç',
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&([a-zA-Z]+);/g, (m, name) => HTML_ENTITIES[name] ?? m)
+}
+
+function stripHtmlTags(s: string): string {
+  // Remove tags but preserve common block-level breaks as spaces so words
+  // don't collide ("...behavior.<br>Leidy..." → "...behavior. Leidy...").
+  return s
+    .replace(/<\s*br\s*\/?>/gi, ' ')
+    .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
 }
 
 function renderTemplate(template: string, view: Record<string, any>): string {
@@ -221,36 +244,63 @@ function renderTemplate(template: string, view: Record<string, any>): string {
 }
 
 /**
- * Drop blank lines and any property line whose value rendered empty
- * (e.g. `koreader-id:: ` with no value). Empty-value property lines
- * confuse Logseq's property indexer and have caused page-load crashes.
+ * Drop empty property lines (e.g. `koreader-id:: ` with no value, which
+ * confuse Logseq's property indexer) and collapse runs of consecutive
+ * blank lines down to one. A single blank line is preserved — Logseq
+ * requires a blank line between block content and its properties for
+ * the property syntax to be recognised.
  */
 function collapseEmptyLines(s: string): string {
-  return s
-    .split('\n')
-    .filter((line) => {
-      const trimmed = line.trim()
-      if (trimmed === '') return false
-      const propMatch = trimmed.match(/^[a-z][a-z0-9-]*::\s*(.*)$/i)
-      if (propMatch && propMatch[1].trim() === '') return false
-      return true
-    })
-    .join('\n')
-    .trim()
+  const lines = s.split('\n').filter((line) => {
+    const trimmed = line.trim()
+    if (trimmed === '') return true // keep blanks for the next pass
+    const propMatch = trimmed.match(/^[a-z][a-z0-9-]*::\s*(.*)$/i)
+    if (propMatch && propMatch[1].trim() === '') return false
+    return true
+  })
+  const out: string[] = []
+  for (const line of lines) {
+    if (line.trim() === '' && (out.length === 0 || out[out.length - 1].trim() === '')) continue
+    out.push(line)
+  }
+  while (out.length > 0 && out[out.length - 1].trim() === '') out.pop()
+  return out.join('\n')
 }
 
 export function pageLink(pageName: string): string {
   return `[[${pageName}]]`
 }
 
+const MAX_PROPERTY_LENGTH = 500
+
+export function truncate(s: string | undefined, max = MAX_PROPERTY_LENGTH): string | undefined {
+  if (!s) return s
+  return s.length > max ? s.slice(0, max).trimEnd() + '…' : s
+}
+
+/**
+ * Replace characters in a book title that would break Logseq syntax when
+ * the name is referenced via [[wikilink]]. Square brackets in particular
+ * collide with the wikilink delimiters: `[[The Economist [May 2nd 2026]]]`
+ * is parsed as `[[The Economist [May 2nd 2026]]` + `]`.
+ */
+export function sanitisePageName(title: string): string {
+  return title
+    .replace(/\[/g, '(')
+    .replace(/\]/g, ')')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /** Disambiguate a book title against an already-taken page name. */
 export function resolvePageName(title: string, authors: string | undefined, taken: (name: string) => boolean): string {
-  if (!taken(title)) return title
+  const base = sanitisePageName(title)
+  if (!taken(base)) return base
   if (authors) {
-    const withAuthor = `${title} — ${authors}`
+    const withAuthor = sanitisePageName(`${title} — ${authors}`)
     if (!taken(withAuthor)) return withAuthor
   }
   let i = 2
-  while (taken(`${title} (${i})`)) i++
-  return `${title} (${i})`
+  while (taken(`${base} (${i})`)) i++
+  return `${base} (${i})`
 }

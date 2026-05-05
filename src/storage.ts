@@ -20,7 +20,16 @@ export async function setBookId(sidecarKey: string, entry: BookIdEntry): Promise
 }
 
 export async function clearBookIds(): Promise<void> {
-  await logseq.updateSettings({ [KEY_BOOK_IDS]: {} })
+  // Logseq's updateSettings deep-merges objects, so `{ [KEY]: {} }` is a no-op.
+  // Setting individual entries to null is the documented pattern for removal;
+  // we then overwrite with an empty object so subsequent reads see {}.
+  const existing = getBookIdsMap()
+  const wipe: Record<string, null> = {}
+  for (const k of Object.keys(existing)) wipe[k] = null
+  if (Object.keys(wipe).length > 0) {
+    await logseq.updateSettings({ [KEY_BOOK_IDS]: wipe })
+  }
+  await logseq.updateSettings({ [KEY_BOOK_IDS]: null as any })
 }
 
 export function getLastHighlightDatetimeMap(): Record<string, string> {
@@ -33,7 +42,13 @@ export async function setLastHighlightDatetime(sidecarKey: string, datetime: str
 }
 
 export async function clearLastHighlightDatetimes(): Promise<void> {
-  await logseq.updateSettings({ [KEY_LAST_HIGHLIGHT]: {} })
+  const existing = getLastHighlightDatetimeMap()
+  const wipe: Record<string, null> = {}
+  for (const k of Object.keys(existing)) wipe[k] = null
+  if (Object.keys(wipe).length > 0) {
+    await logseq.updateSettings({ [KEY_LAST_HIGHLIGHT]: wipe })
+  }
+  await logseq.updateSettings({ [KEY_LAST_HIGHLIGHT]: null as any })
 }
 
 export function getHighlightIdsMap(): Record<string, Record<string, true>> {
@@ -50,7 +65,13 @@ export async function recordHighlightIds(sidecarKey: string, ids: string[]): Pro
 }
 
 export async function clearHighlightIds(): Promise<void> {
-  await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: {} })
+  const existing = getHighlightIdsMap()
+  const wipe: Record<string, null> = {}
+  for (const k of Object.keys(existing)) wipe[k] = null
+  if (Object.keys(wipe).length > 0) {
+    await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: wipe })
+  }
+  await logseq.updateSettings({ [KEY_HIGHLIGHT_IDS]: null as any })
 }
 
 export function getLastSync(): string | undefined {

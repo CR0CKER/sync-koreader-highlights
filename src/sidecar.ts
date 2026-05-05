@@ -202,7 +202,12 @@ function readKey(f: any): string | number | undefined {
 
 function readValue(v: any): any {
   if (!v) return undefined
-  if (v.type === 'StringLiteral') return stripQuotes(v.raw ?? v.value)
+  if (v.type === 'StringLiteral') {
+    // Prefer the parsed `value` (Lua-unescaped) over the raw source. Falling
+    // back to `raw` would leave \"-style escapes intact and HTML-entity-laden
+    // descriptions would render those backslashes verbatim in Logseq.
+    return typeof v.value === 'string' ? v.value : stripQuotes(v.raw ?? '')
+  }
   if (v.type === 'NumericLiteral') return v.value
   if (v.type === 'BooleanLiteral') return v.value
   if (v.type === 'NilLiteral') return undefined
