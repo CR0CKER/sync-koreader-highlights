@@ -4,6 +4,22 @@
   "description": "Sync KOReader sidecar highlights into Logseq, one page per book.",
   "version": "0.1.0",
   "main": "dist/index.html",
+  "homepage": "https://github.com/CR0CKER/sync-koreader-highlights",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CR0CKER/sync-koreader-highlights.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CR0CKER/sync-koreader-highlights/issues"
+  },
+  "keywords": [
+    "logseq",
+    "logseq-plugin",
+    "koreader",
+    "highlights",
+    "annotations",
+    "reading-notes"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build"
