@@ -21,10 +21,7 @@ idempotent replace-on-change sync model.
 
 > **AI-assisted development.** This plugin was built with substantial
 > help from [Claude Code](https://www.anthropic.com/claude-code).
-> Every line of source code was reviewed by a human author before
-> commit, but the architecture, debugging, and a large fraction of
-> the prose were drafted by an AI assistant. If that matters to you,
-> read the source before you load the plugin into your graph.
+> If that matters to you, read the source before you load the plugin into your graph.
 
 > **Use at your own risk.** This software is provided "as is",
 > without warranty of any kind, express or implied. The author
