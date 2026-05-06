@@ -269,6 +269,18 @@ async function bootstrap() {
     },
   )
 
+  logseq.App.registerCommandPalette(
+    { key: 'sync-koreader-highlights-reset-templates', label: 'Sync Koreader Highlights: reset templates to defaults' },
+    async () => {
+      await logseq.updateSettings({
+        bookHeaderTemplate: DEFAULT_TEMPLATES.bookHeader,
+        highlightsHeadingTemplate: DEFAULT_TEMPLATES.highlightsHeading,
+        highlightBlockTemplate: DEFAULT_TEMPLATES.highlightBlock,
+      })
+      await logseq.UI.showMsg('Sync Koreader Highlights: templates reset to defaults.', 'success')
+    },
+  )
+
   applyAutoSyncInterval()
 
   if (logseq.settings?.autoSyncOnLaunch) {

@@ -13,7 +13,7 @@ import { KoreaderHighlight, KoreaderSidecar } from './sidecar'
  */
 export const DEFAULT_BOOK_HEADER_TEMPLATE = ``
 
-export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `Highlights synced from [[KOReader]] on [[{{date}}]]`
+export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `Highlights synced from [[KOReader]]`
 
 /**
  * Default highlight-block template. Reproduces the structured-properties

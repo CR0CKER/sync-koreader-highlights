@@ -67,8 +67,10 @@ marketplace; load the repository as an unpacked plugin.
   intentionally skip `date-updated`.
 
 - **Highlights heading.** A single block per book, content
-  `Highlights synced from [[KOReader]] on [[<date>]]`. The `[[KOReader]]`
-  link gives you a backlink to every book on the index page.
+  `Highlights synced from [[KOReader]]`. The `[[KOReader]]` link
+  gives you a backlink to every book on the index page. The heading
+  intentionally omits a date because each highlight block already
+  carries its own `date::` page-link to the journal day it was made.
 
 ### Per sync run
 
@@ -155,8 +157,10 @@ In Logseq → Plugins → Sync KOReader Highlights → ⚙:
   `{{tagsLinked}}`, `{{language}}`, `{{summary}}` (alias
   `{{description}}`), `{{koreaderId}}`.
 - **Highlights section heading template** *(Mustache; default
-  `Highlights synced from [[KOReader]] on [[{{date}}]]`)* — always
-  rendered through Mustache. Variables: `{{date}}`, `{{kind}}`.
+  `Highlights synced from [[KOReader]]`)* — always rendered through
+  Mustache. Variables: `{{date}}` (current sync time), `{{kind}}`
+  (`"initial sync"` or `"sync"`). Add them back to the template if
+  you want a date-bearing heading.
 - **Highlight block template** *(Mustache; default reproduces the
   inline-properties shape)* — when left at the default, the renderer
   uses Logseq's structured-properties API (safer escaping). When
@@ -183,6 +187,7 @@ itself lives in IndexedDB under
   - `Sync KOReader Highlights: reset sync state`
   - `Sync KOReader Highlights: reset and delete all book pages`
   - `Sync KOReader Highlights: forget remembered directory`
+  - `Sync KOReader Highlights: reset templates to defaults`
 - All other configuration lives in the standard Logseq plugin
   settings panel.
 
