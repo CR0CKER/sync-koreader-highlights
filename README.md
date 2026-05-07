@@ -48,6 +48,25 @@ library. Not yet on the Logseq plugin marketplace; load the
 repository as an unpacked plugin (see
 [Loading in Logseq](#loading-in-logseq) below).
 
+## Screenshots
+
+A book page with KOReader-derived properties (author, tags, summary)
+and the synced highlights below:
+
+![Book page with properties and highlights](docs/screenshots/book-page.png)
+
+A journal day, showing every highlight made on that date as a Linked
+Reference — produced automatically by the `date::` page-link on each
+highlight block, with no plugin-authored blocks on the journal page:
+
+![Journal day with linked references to highlights](docs/screenshots/journal-day.png)
+
+The `KOReader` index page, where each sync writes a receipt and every
+synced book backlinks via the `[[KOReader]]` mention in its highlights
+heading:
+
+![KOReader index page with sync receipt and linked book](docs/screenshots/koreader-index.png)
+
 ## What it does
 
 ### Per book
