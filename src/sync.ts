@@ -11,10 +11,9 @@ import {
   DEFAULT_TEMPLATES,
   RenderContext,
   Templates,
-  bookPageProperties,
   isIndexReceiptHeading,
   parseKoreaderDatetime,
-  renderBookHeaderTemplate,
+  renderBookHeaderProperties,
   renderHighlightsSection,
   renderIndexReceipt,
   renderUpdateSection,
@@ -168,19 +167,13 @@ async function createBookPage(
   ctx: RenderContext,
   syncDate: Date,
 ): Promise<{ pageUuid: string } | null> {
-  const pageProps = bookPageProperties(sidecar)
-  const customHeader = renderBookHeaderTemplate(sidecar, ctx)
-  // Use page-level properties only when the user is on the default
-  // (empty) book-header template. If they've supplied a custom one,
-  // we'll render it as an in-page block instead and skip page-level
-  // properties to avoid duplication.
-  const initialProps = customHeader === null ? pageProps : {}
+  const pageProps = renderBookHeaderProperties(sidecar, ctx)
 
   const existingPage = await logseq.Editor.getPage(pageName)
   let page: any = existingPage
   if (!page) {
     try {
-      page = await logseq.Editor.createPage(pageName, initialProps, {
+      page = await logseq.Editor.createPage(pageName, pageProps, {
         createFirstBlock: false,
         redirect: false,
       })
@@ -192,27 +185,19 @@ async function createBookPage(
     // Page already exists (user-authored, or from a prior plugin run).
     // Don't overwrite anything: only set page properties that aren't
     // already present.
-    if (customHeader === null) {
-      for (const [k, v] of Object.entries(pageProps)) {
-        try {
-          const existingValue = await logseq.Editor.getBlockProperty(page.uuid, k)
-          if (existingValue === null || existingValue === undefined || existingValue === '') {
-            await logseq.Editor.upsertBlockProperty(page.uuid, k, v)
-          }
-        } catch (e) {
-          console.warn('sync-koreader-highlights: property merge failed for', pageName, k, e)
+    for (const [k, v] of Object.entries(pageProps)) {
+      try {
+        const existingValue = await logseq.Editor.getBlockProperty(page.uuid, k)
+        if (existingValue === null || existingValue === undefined || existingValue === '') {
+          await logseq.Editor.upsertBlockProperty(page.uuid, k, v)
         }
+      } catch (e) {
+        console.warn('sync-koreader-highlights: property merge failed for', pageName, k, e)
       }
     }
     console.log('sync-koreader-highlights: existing page preserved, appending sync content:', pageName)
   }
   if (!page) return null
-
-  // Optional header block from the user's template, prepended above
-  // any existing content so it's the first thing readers see.
-  if (customHeader !== null && customHeader.trim().length > 0) {
-    await logseq.Editor.prependBlockInPage(pageName, customHeader)
-  }
 
   if (sidecar.highlights.length === 0) {
     return { pageUuid: (page as any).uuid }

@@ -39,9 +39,9 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
     key: 'bookHeaderTemplate',
     title: 'Book page header template (Mustache)',
     description:
-      'Optional Mustache template rendered as an extra block at the top of each book page. ' +
-      'Leave blank to use Logseq\'s page-level properties (title / author / series / tags / summary). ' +
-      'When set, page-level properties are skipped to avoid duplication. ' +
+      'Mustache template defining the page-level properties on each book page. ' +
+      'Render output is parsed line-by-line as `key:: value` pairs and written via Logseq\'s structured `createPage` properties API for safe escaping (the same path is used whether you keep the default or customise). ' +
+      'Lines that don\'t match `key:: value` are dropped — empty Mustache sections (e.g. `{{#series}}…{{/series}}`) collapse cleanly. ' +
       'Variables: {{title}}, {{authors}} (comma-joined plain text), {{authorsLinked}} (each as [[wikilink]]), ' +
       '{{series}}, {{seriesLinked}}, {{tags}}, {{tagsLinked}}, ' +
       '{{language}}, {{summary}} (alias {{description}}), {{koreaderId}}.',

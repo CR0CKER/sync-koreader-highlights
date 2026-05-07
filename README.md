@@ -212,14 +212,20 @@ In Logseq → Plugins → Sync KOReader Highlights → ⚙:
   runs a sync every N minutes. Background ticks never prompt for
   the picker (they're a no-op when the directory hasn't been
   remembered yet), to avoid disrupting the user.
-- **Book page header template** *(Mustache; default empty)* —
-  when empty the plugin uses the page-level properties path
-  (above). When filled, the rendered text is prepended as a
-  regular block at the top of each book page and the page-level
-  properties are skipped to avoid duplication. Variables:
-  `{{title}}`, `{{authors}}`, `{{authorsLinked}}`, `{{series}}`,
-  `{{seriesLinked}}`, `{{tags}}`, `{{tagsLinked}}`, `{{language}}`,
-  `{{summary}}` (alias `{{description}}`), `{{koreaderId}}`.
+- **Book page header template** *(Mustache)* — defines the
+  page-level properties on each book page. Pre-filled with a
+  default that produces the standard `title`/`author`/`series`/
+  `tags`/`summary` properties. Add, remove, or rename properties
+  by editing the template; the rendered output is parsed
+  line-by-line as `key:: value` pairs and written through
+  Logseq's structured `createPage` properties API for safe
+  escaping (same path whether you keep the default or
+  customise). Lines that don't match `key:: value` are dropped,
+  so empty Mustache sections (`{{#series}}…{{/series}}`) collapse
+  cleanly. Variables: `{{title}}`, `{{authors}}`,
+  `{{authorsLinked}}`, `{{series}}`, `{{seriesLinked}}`,
+  `{{tags}}`, `{{tagsLinked}}`, `{{language}}`, `{{summary}}`
+  (alias `{{description}}`), `{{koreaderId}}`.
 - **Highlights section heading template** *(Mustache; default
   `Highlights synced from [[KOReader]]`)* — always rendered
   through Mustache. Variables: `{{date}}` (current sync time),

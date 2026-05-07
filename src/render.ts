@@ -4,14 +4,24 @@ import formatDate from 'date-fns/format'
 import { KoreaderHighlight, KoreaderSidecar } from './sidecar'
 
 /**
- * Default empty book-header template: when blank, the plugin uses the
- * page-level properties path (createPage with structured properties),
- * which is the safest rendering against arbitrary description content.
- * If the user fills in a template, an extra block is added at the top
- * of the page using the rendered text — they take responsibility for
- * the property syntax.
+ * Default book-header template. The text is shown verbatim in the
+ * settings panel so users can see and edit a real starting point.
+ *
+ * As long as the field still equals this default (or is blank), the
+ * plugin renders book-page metadata via Logseq's structured-properties
+ * `createPage` path — the safest option against arbitrary description
+ * content (HTML entities, escape sequences, oversized values).
+ *
+ * Once the user changes the field, the rendered Mustache output is
+ * prepended as a regular block at the top of each book page and
+ * structured page-level properties are skipped to avoid duplication.
+ * The user then owns the property syntax.
  */
-export const DEFAULT_BOOK_HEADER_TEMPLATE = ``
+export const DEFAULT_BOOK_HEADER_TEMPLATE = `title:: {{title}}
+{{#authorsLinked}}author:: {{authorsLinked}}{{/authorsLinked}}
+{{#seriesLinked}}series:: {{seriesLinked}}{{/seriesLinked}}
+{{#tagsLinked}}tags:: {{tagsLinked}}{{/tagsLinked}}
+{{#summary}}summary:: {{summary}}{{/summary}}`
 
 export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `Highlights synced from [[KOReader]]`
 
@@ -155,15 +165,22 @@ export function renderHighlight(h: KoreaderHighlight, ctx: RenderContext): IBatc
 }
 
 /**
- * Optional extra block rendered at the top of a book page when the user
- * has filled in a non-empty `bookHeaderTemplate`. Returns the rendered
- * string, or null when the default (empty) template is in effect, in
- * which case the caller should fall back to page-level properties via
- * `createPage(name, bookPageProperties(...), …)`.
+ * Render the book-page header template into a `key → value` map suitable
+ * for Logseq's structured `createPage(name, properties, opts)` API.
+ *
+ * The template is rendered with Mustache (using the configured field, or
+ * the shipped default if blank), then the rendered text is parsed
+ * line-by-line back into properties. This keeps the safe-escaping path
+ * regardless of whether the user has customised the template.
+ *
+ * Lines that don't match `key:: value` (where `key` is a Logseq-style
+ * property name: starts with a letter, contains letters/digits/dashes)
+ * are silently dropped — empty Mustache sections leave blank lines, and
+ * users who want freeform body content should edit the page directly,
+ * which existing-page protection preserves.
  */
-export function renderBookHeaderTemplate(sidecar: KoreaderSidecar, ctx: RenderContext): string | null {
-  const tpl = ctx.templates.bookHeader ?? ''
-  if (tpl.trim() === '') return null
+export function renderBookHeaderProperties(sidecar: KoreaderSidecar, ctx: RenderContext): Record<string, string> {
+  const tpl = ctx.templates.bookHeader?.trim() ? ctx.templates.bookHeader : DEFAULT_BOOK_HEADER_TEMPLATE
   const authors = (sidecar.authors ?? []).map((a) => sanitisePropertyValue(a)).filter((a): a is string => !!a)
   const tags = (sidecar.keywords ?? []).map((t) => sanitisePropertyValue(t)).filter((t): t is string => !!t)
   const view = {
@@ -183,30 +200,26 @@ export function renderBookHeaderTemplate(sidecar: KoreaderSidecar, ctx: RenderCo
       .join(', '),
     koreaderId: sanitisePropertyValue(sidecar.partialMd5 ?? sidecar.docPath) ?? '',
   }
-  return renderTemplate(tpl, view)
+  const rendered = renderTemplate(tpl, view)
+  return parseInlineProperties(rendered)
+}
+
+const PROPERTY_LINE_RE = /^([a-zA-Z][a-zA-Z0-9-]*)::\s*(.+?)\s*$/
+
+function parseInlineProperties(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const rawLine of text.split('\n')) {
+    const m = rawLine.match(PROPERTY_LINE_RE)
+    if (!m) continue
+    const [, key, value] = m
+    if (!value || out[key]) continue
+    out[key] = value
+  }
+  return out
 }
 
 function templateIsDefault(actual: string | undefined, defaultTpl: string): boolean {
   return (actual ?? '').trim() === defaultTpl.trim()
-}
-
-/** Compute the page-level properties for a book page. */
-export function bookPageProperties(sidecar: KoreaderSidecar): Record<string, string> {
-  const out: Record<string, string> = {}
-  const title = sanitisePropertyValue(sidecar.title)
-  if (title) out.title = title
-  const authorsLink = renderAuthorsAsWikilinks(sidecar.authors)
-  if (authorsLink) out.author = authorsLink
-  const seriesLink = renderSeriesAsWikilink(sidecar.series)
-  if (seriesLink) out.series = seriesLink
-  const tagsLink = renderTagsAsWikilinks(sidecar.keywords)
-  if (tagsLink) out.tags = tagsLink
-  const summary = sanitisePropertyValue(sidecar.description)
-  if (summary) out.summary = summary
-  // koreader-id intentionally omitted from page properties — it's
-  // human-irrelevant. The plugin's bookIdsMap holds the same identifier
-  // internally, so re-syncs still dedup correctly.
-  return out
 }
 
 function sanitiseForWikilink(s: string): string {
@@ -217,31 +230,6 @@ function renderSeriesAsWikilink(series: string | undefined): string | undefined 
   const cleaned = sanitisePropertyValue(series)
   if (!cleaned) return undefined
   return `[[${sanitiseForWikilink(cleaned)}]]`
-}
-
-function renderTagsAsWikilinks(tags: string[] | undefined): string | undefined {
-  if (!tags || tags.length === 0) return undefined
-  const links = tags
-    .map((t) => sanitisePropertyValue(t))
-    .filter((t): t is string => !!t)
-    .map((t) => `[[${sanitiseForWikilink(t)}]]`)
-  return links.length > 0 ? links.join(', ') : undefined
-}
-
-/**
- * Render each author as a separate Logseq wikilink so clicking any one
- * opens that author's page (and Logseq's backlink panel collates every
- * book by that author). Multiple authors join with ", " between links.
- * `[`/`]` inside an author name would break the wikilink delimiters and
- * are replaced with `(`/`)` — same pattern as page-name sanitisation.
- */
-function renderAuthorsAsWikilinks(authors: string[] | undefined): string | undefined {
-  if (!authors || authors.length === 0) return undefined
-  const links = authors
-    .map((a) => sanitisePropertyValue(a))
-    .filter((a): a is string => !!a)
-    .map((a) => `[[${a.replace(/\[/g, '(').replace(/\]/g, ')')}]]`)
-  return links.length > 0 ? links.join(', ') : undefined
 }
 
 export function renderHighlightsHeading(kind: 'initial sync' | 'sync', ctx: RenderContext, date: Date): string {

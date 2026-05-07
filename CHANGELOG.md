@@ -4,6 +4,24 @@ All notable changes to this project will be documented here. The format
 is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Book-page header template setting now ships with a visible default
+  that mirrors the structured page-level properties, so users can see
+  and edit a real starting point. The rendered template is always
+  parsed line-by-line as `key:: value` pairs and written through
+  Logseq's structured `createPage` properties API — the same safe
+  path is used whether the default is kept or the user customises.
+  Customising the template adjusts the page-level properties
+  themselves, not a separate inline block.
+
+### Documentation
+
+- README now includes screenshots of a book page, a journal day, and
+  the `KOReader` index page.
+
 ## [0.1.0] – 2026-05-06
 
 Initial public release.
