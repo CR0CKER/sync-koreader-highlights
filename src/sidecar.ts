@@ -132,7 +132,7 @@ function extractHighlights(raw: any): KoreaderHighlight[] {
     for (const a of annotations) {
       if (!a) continue
       out.push({
-        text: stringOrUndefined(a.text) ?? '',
+        text: isRibbonBookmark(a) ? '' : stringOrUndefined(a.text) ?? '',
         note: stringOrUndefined(a.note),
         page: a.pageno ?? a.page,
         chapter: stringOrUndefined(a.chapter),
@@ -150,7 +150,7 @@ function extractHighlights(raw: any): KoreaderHighlight[] {
     for (const b of bookmarks) {
       if (!b) continue
       out.push({
-        text: stringOrUndefined(b.notes) ?? stringOrUndefined(b.text) ?? '',
+        text: isRibbonBookmark(b) ? '' : stringOrUndefined(b.text) ?? '',
         note: undefined,
         page: b.page,
         chapter: stringOrUndefined(b.chapter),
@@ -160,6 +160,19 @@ function extractHighlights(raw: any): KoreaderHighlight[] {
     }
   }
   return out
+}
+
+/**
+ * KOReader's ribbon page-bookmarks live alongside text highlights in
+ * the `annotations` (modern) and `bookmarks` (legacy) arrays. They have
+ * no `pos0`/`pos1` selection range — those are present on every text
+ * highlight — and KOReader auto-fills `text` with "in <chapter>" so the
+ * row renders as something in its own UI. We detect the shape via the
+ * absent selection range and discard the auto-text so the renderer's
+ * "empty text → page bookmark" path can produce `> Bookmarked`.
+ */
+function isRibbonBookmark(a: any): boolean {
+  return !stringOrUndefined(a?.pos0) && !stringOrUndefined(a?.pos1)
 }
 
 function deriveHighlightId(a: any): string {
