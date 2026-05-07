@@ -17,11 +17,12 @@ import { KoreaderHighlight, KoreaderSidecar } from './sidecar'
  * structured page-level properties are skipped to avoid duplication.
  * The user then owns the property syntax.
  */
-export const DEFAULT_BOOK_HEADER_TEMPLATE = `title:: {{title}}
-{{#authorsLinked}}author:: {{authorsLinked}}{{/authorsLinked}}
+export const DEFAULT_BOOK_HEADER_TEMPLATE = `{{#authorsLinked}}author:: {{authorsLinked}}{{/authorsLinked}}
+full-title:: {{title}}
 {{#seriesLinked}}series:: {{seriesLinked}}{{/seriesLinked}}
-{{#tagsLinked}}tags:: {{tagsLinked}}{{/tagsLinked}}
-{{#summary}}summary:: {{summary}}{{/summary}}`
+category:: #Books
+{{#summary}}summary:: {{summary}}{{/summary}}
+{{#tagsLinked}}tags:: {{tagsLinked}}{{/tagsLinked}}`
 
 export const DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE = `Highlights synced from [[KOReader]]`
 

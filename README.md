@@ -83,27 +83,31 @@ heading:
   - Title collisions get disambiguated as `<title> — <authors>` or
     `<title> (n)`.
 
-- **Page-level properties** (set via Logseq's structured
+- **Page-level properties** (defined by the customisable
+  Book-page header template and written via Logseq's structured
   `createPage(name, properties, opts)` API so Logseq escapes them
-  natively):
-  - `title::` — full original title, including any colons.
+  natively). The default template produces:
   - `author::` — each KOReader author rendered as its own
     `[[wikilink]]`. Names containing `Last, First` commas are split
     only on KOReader's `\n` separator, never on commas inside a name.
+  - `full-title::` — full original title, including any colons.
   - `series::` — single `[[wikilink]]` from `doc_props.series`
     when present.
+  - `category:: #Books` — a constant tag so every synced book is
+    grouped under the `Books` page.
+  - `summary::` — the full `doc_props.description`, with HTML tags
+    stripped, named/numeric HTML entities decoded, and Lua escapes
+    resolved. Not truncated.
   - `tags::` — comma-joined `[[wikilinks]]`, sourced from
     `doc_props.keywords` (or `doc_props.subject` as fallback).
     Split on `;`, `,`, and newlines so KOReader's multi-line
     keyword form (`Philosophy\<newline>Life`) yields two distinct
     tags.
-  - `summary::` — the full `doc_props.description`, with HTML tags
-    stripped, named/numeric HTML entities decoded, and Lua escapes
-    resolved. Not truncated.
 
   All values are sanitised before being written: newlines collapsed,
   duplicate `::` neutralised, whitespace trimmed. Empty values cause
-  their property line to drop out entirely.
+  their property line to drop out entirely. Edit the Book-page
+  header template setting to add, remove, or rename any of these.
 
 - **Highlights / notes / bookmarks** (KOReader stores all three in
   the `annotations` table; the renderer disambiguates by which
@@ -214,12 +218,12 @@ In Logseq → Plugins → Sync KOReader Highlights → ⚙:
   remembered yet), to avoid disrupting the user.
 - **Book page header template** *(Mustache)* — defines the
   page-level properties on each book page. Pre-filled with a
-  default that produces the standard `title`/`author`/`series`/
-  `tags`/`summary` properties. Add, remove, or rename properties
-  by editing the template; the rendered output is parsed
-  line-by-line as `key:: value` pairs and written through
-  Logseq's structured `createPage` properties API for safe
-  escaping (same path whether you keep the default or
+  default that produces `author`, `full-title`, `series`,
+  `category:: #Books`, `summary`, and `tags`. Add, remove, or
+  rename properties by editing the template; the rendered output
+  is parsed line-by-line as `key:: value` pairs and written
+  through Logseq's structured `createPage` properties API for
+  safe escaping (same path whether you keep the default or
   customise). Lines that don't match `key:: value` are dropped,
   so empty Mustache sections (`{{#series}}…{{/series}}`) collapse
   cleanly. Variables: `{{title}}`, `{{authors}}`,
