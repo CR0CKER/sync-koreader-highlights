@@ -74,6 +74,33 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   },
 ]
 
+/**
+ * Logseq does not backfill schema defaults onto settings keys that have
+ * already been written to the user's settings file (which happens on
+ * first plugin load even if the user never opens the settings panel).
+ * That leaves the textareas blank in the UI for users upgrading from a
+ * prior version where the default was an empty string. On every load,
+ * write the shipped default into any template field that's missing or
+ * blank so the UI shows an editable starting point.
+ */
+function backfillTemplateDefaults(): void {
+  const s = logseq.settings ?? {}
+  const updates: Record<string, string> = {}
+  if (!(s.bookHeaderTemplate as string | undefined)?.trim()) {
+    updates.bookHeaderTemplate = DEFAULT_TEMPLATES.bookHeader
+  }
+  if (!(s.highlightsHeadingTemplate as string | undefined)?.trim()) {
+    updates.highlightsHeadingTemplate = DEFAULT_TEMPLATES.highlightsHeading
+  }
+  if (!(s.highlightBlockTemplate as string | undefined)?.trim()) {
+    updates.highlightBlockTemplate = DEFAULT_TEMPLATES.highlightBlock
+  }
+  if (Object.keys(updates).length > 0) {
+    logseq.updateSettings(updates)
+    console.log('sync-koreader-highlights: backfilled template defaults:', Object.keys(updates))
+  }
+}
+
 function loadTemplates(): Templates {
   const s = logseq.settings ?? {}
   return {
@@ -201,6 +228,7 @@ function applyAutoSyncInterval(): void {
 async function bootstrap() {
   console.log('sync-koreader-highlights: main loaded')
   logseq.useSettingsSchema(SETTINGS_SCHEMA)
+  backfillTemplateDefaults()
 
   await loadCachedHandle()
 
