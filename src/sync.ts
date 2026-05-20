@@ -182,10 +182,31 @@ async function createBookPage(
       return null
     }
   } else {
-    // Page already exists (user-authored, or from a prior plugin run).
-    // Don't overwrite anything: only set page properties that aren't
-    // already present.
+    // Page already exists (user-authored, or from a prior plugin run,
+    // or written by another plugin such as logseq-reading-list). Don't
+    // overwrite anything: only set page properties that aren't already
+    // present anywhere on the page.
+    //
+    // `getBlockProperty(page.uuid, k)` only checks page-level
+    // properties (the pre-block). Other plugins may store properties on
+    // a *content* block instead — for example, logseq-reading-list
+    // puts author/full-title/category/summary/tags on a dedicated
+    // properties block so the cover image can sit above them. Without
+    // also scanning child blocks we'd write a second page-level copy
+    // and end up with duplicate `author::` etc.
+    const tree = (await logseq.Editor.getPageBlocksTree(pageName)) || []
+    const blockLevelKeys = new Set<string>()
+    const collect = (b: any) => {
+      const props = b?.properties
+      if (props && typeof props === 'object') {
+        for (const k of Object.keys(props)) blockLevelKeys.add(k)
+      }
+      if (Array.isArray(b?.children)) for (const c of b.children) collect(c)
+    }
+    for (const b of tree) collect(b)
+
     for (const [k, v] of Object.entries(pageProps)) {
+      if (blockLevelKeys.has(k)) continue
       try {
         const existingValue = await logseq.Editor.getBlockProperty(page.uuid, k)
         if (existingValue === null || existingValue === undefined || existingValue === '') {
