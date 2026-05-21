@@ -141,6 +141,48 @@ async function clearCachedHandle(): Promise<void> {
   try { await idbDel(PICKER_HANDLE_KEY) } catch {}
 }
 
+/**
+ * Resolve a callable `showDirectoryPicker` across realms.
+ *
+ * Logseq plugins run inside an iframe. The File System Access API is
+ * gated by Permissions Policy and is disabled by default in cross-origin
+ * iframes — on macOS / Windows Logseq builds the call from inside the
+ * iframe throws SecurityError or returns undefined, so the native dialog
+ * never appears. Linux builds happen to expose it in the iframe realm,
+ * which is why this code path appeared to work there.
+ *
+ * Walk up to the top window and pick the first realm that exposes the
+ * function. The returned FileSystemDirectoryHandle is structured-cloneable
+ * and works fine when used back in the iframe realm (its `.values()`,
+ * `.getFile()`, etc. cross realms without issue).
+ */
+function resolveDirectoryPicker(): (() => Promise<any>) | null {
+  const realms: Window[] = []
+  let w: Window | null = window
+  const seen = new Set<Window>()
+  while (w && !seen.has(w)) {
+    seen.add(w)
+    realms.push(w)
+    try {
+      const next: Window | null = w.parent
+      if (!next || next === w) break
+      w = next
+    } catch {
+      // Cross-origin guard — can't walk further up.
+      break
+    }
+  }
+  for (const realm of realms) {
+    try {
+      const fn = (realm as any).showDirectoryPicker
+      if (typeof fn === 'function') return fn.bind(realm)
+    } catch {
+      // Accessing the property may throw on locked-down realms; skip.
+    }
+  }
+  return null
+}
+
 async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
   const remember = !!logseq.settings?.rememberDirectory
   if (remember && pickerCache.handle) {
@@ -162,13 +204,37 @@ async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
     }
   }
   if (!allowPrompt) return null
+  const picker = resolveDirectoryPicker()
+  console.log(
+    'sync-koreader-highlights: showDirectoryPicker availability —',
+    'self:', typeof (window as any).showDirectoryPicker,
+    'parent:', (() => { try { return typeof (window.parent as any)?.showDirectoryPicker } catch { return 'blocked' } })(),
+    'top:', (() => { try { return typeof (window.top as any)?.showDirectoryPicker } catch { return 'blocked' } })(),
+    'resolved:', picker ? 'yes' : 'no',
+  )
+  if (!picker) {
+    await logseq.UI.showMsg(
+      'Sync Koreader Highlights: this Logseq build does not expose the File System Access API to plugins (showDirectoryPicker is unavailable). Please report this with your OS and Logseq version.',
+      'error',
+    )
+    return null
+  }
   try {
-    const handle = await window.showDirectoryPicker()
+    const handle = await picker()
     pickerCache.handle = handle
     if (remember) await persistHandle(handle)
     return handle
-  } catch (e) {
-    console.warn('sync-koreader-highlights: directory picker cancelled', e)
+  } catch (e: any) {
+    // AbortError = user cancelled the native dialog. Anything else is a real failure.
+    if (e?.name === 'AbortError') {
+      console.log('sync-koreader-highlights: directory picker cancelled by user')
+      return null
+    }
+    console.warn('sync-koreader-highlights: directory picker failed', e)
+    await logseq.UI.showMsg(
+      `Sync Koreader Highlights: directory picker failed (${e?.name ?? 'Error'}: ${e?.message ?? e}).`,
+      'error',
+    )
     return null
   }
 }
@@ -184,7 +250,8 @@ async function syncNow(allowPrompt: boolean): Promise<void> {
   try {
     const handle = await pickDirectory(allowPrompt)
     if (!handle) {
-      if (allowPrompt) await logseq.UI.showMsg('Sync Koreader Highlights: directory not selected.', 'warning')
+      // pickDirectory already surfaced any failure/unavailability toast.
+      // Silent user cancellation needs no further message.
       return
     }
     await logseq.UI.showMsg('Sync Koreader Highlights: starting…', 'info')
