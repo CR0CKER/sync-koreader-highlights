@@ -6,6 +6,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] – 2026-05-21
+
+### Fixed
+
+- Directory picker now appears on macOS (and Windows) Logseq builds.
+  `window.showDirectoryPicker` is gated by Permissions Policy inside
+  the plugin iframe and is disabled by default on those platforms;
+  the plugin now walks `window → parent → top` and calls the API in
+  the first realm that exposes it. When no realm exposes it the user
+  gets an explicit error toast instead of silent failure, and
+  per-realm availability is logged to the console for diagnosis.
+- Picker failures other than user-cancellation now surface a toast
+  naming the underlying error instead of being swallowed.
+
 ### Changed
 
 - Book-page header template setting now ships with a visible default
@@ -16,6 +30,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   path is used whether the default is kept or the user customises.
   Customising the template adjusts the page-level properties
   themselves, not a separate inline block.
+- Schema defaults for the three template settings are backfilled on
+  plugin load, so the textareas show an editable starting point even
+  for users upgrading from a version where the default was empty.
+- KOReader ribbon page bookmarks render as `Bookmarked` for clarity.
+- Merging into an existing book page no longer duplicates block-level
+  properties.
 
 ### Documentation
 
