@@ -6,6 +6,32 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] – 2026-05-21
+
+### Fixed
+
+- Directory picker on macOS / Windows marketplace installs. The 0.1.1
+  fix (resolve `showDirectoryPicker` across realms) was insufficient:
+  Chromium blocks the File System Access API from cross-origin
+  iframes regardless of which realm exposes the function, throwing
+  `SecurityError: Cross origin sub frames aren't allowed to show a
+  file picker`. Logseq's marketplace install runs plugins in a cross-
+  origin iframe (dev-mode install does not, which is why the previous
+  release worked when loaded as an unpacked plugin). The plugin now
+  detects the cross-origin case upfront and falls back to a
+  `<input type="file" webkitdirectory>` picker, which is gated only by
+  a user click and not by Permissions Policy. The returned `FileList`
+  is wrapped in a minimal `FileSystemDirectoryHandle`-shaped adapter
+  so the sidecar walker is unchanged.
+
+### Known limitations
+
+- On platforms using the `<input>` fallback (macOS / Windows
+  marketplace installs at time of release), "Remember Koreader
+  directory" cannot persist across Logseq restarts — `File` blobs
+  don't survive a reload. The plugin will prompt for the directory on
+  every sync and surfaces a one-time toast explaining this.
+
 ## [0.1.1] – 2026-05-21
 
 ### Fixed

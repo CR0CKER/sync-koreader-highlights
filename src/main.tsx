@@ -142,45 +142,108 @@ async function clearCachedHandle(): Promise<void> {
 }
 
 /**
- * Resolve a callable `showDirectoryPicker` across realms.
- *
- * Logseq plugins run inside an iframe. The File System Access API is
- * gated by Permissions Policy and is disabled by default in cross-origin
- * iframes — on macOS / Windows Logseq builds the call from inside the
- * iframe throws SecurityError or returns undefined, so the native dialog
- * never appears. Linux builds happen to expose it in the iframe realm,
- * which is why this code path appeared to work there.
- *
- * Walk up to the top window and pick the first realm that exposes the
- * function. The returned FileSystemDirectoryHandle is structured-cloneable
- * and works fine when used back in the iframe realm (its `.values()`,
- * `.getFile()`, etc. cross realms without issue).
+ * Detect whether this plugin runs in a cross-origin iframe. Logseq's
+ * marketplace install places plugins in a different origin from the
+ * host window; dev-mode "load unpacked plugin" usually shares origin
+ * with the host. The File System Access API (`showDirectoryPicker`) is
+ * blocked from cross-origin iframes by Chromium's Permissions Policy
+ * regardless of which realm exposes the function — calling it throws
+ * `SecurityError: Cross origin sub frames aren't allowed to show a
+ * file picker`. There is no workaround from inside the iframe; the
+ * host page would need to set `allow="..."` on our iframe, which we
+ * can't control. In that case we fall back to `<input webkitdirectory>`,
+ * which only needs a user click and is not gated by Permissions Policy.
  */
-function resolveDirectoryPicker(): (() => Promise<any>) | null {
-  const realms: Window[] = []
-  let w: Window | null = window
-  const seen = new Set<Window>()
-  while (w && !seen.has(w)) {
-    seen.add(w)
-    realms.push(w)
-    try {
-      const next: Window | null = w.parent
-      if (!next || next === w) break
-      w = next
-    } catch {
-      // Cross-origin guard — can't walk further up.
-      break
-    }
+function isCrossOriginIframe(): boolean {
+  if (window.top === window.self) return false
+  try {
+    void window.top!.document
+    return false
+  } catch {
+    return true
   }
-  for (const realm of realms) {
-    try {
-      const fn = (realm as any).showDirectoryPicker
-      if (typeof fn === 'function') return fn.bind(realm)
-    } catch {
-      // Accessing the property may throw on locked-down realms; skip.
-    }
+}
+
+function showDirectoryPickerAvailable(): boolean {
+  return typeof (window as any).showDirectoryPicker === 'function'
+}
+
+/**
+ * Wrap a flat `FileList` produced by `<input webkitdirectory>` in an
+ * object that mimics enough of `FileSystemDirectoryHandle` for
+ * `walkSidecars()` to iterate it. The directory tree is collapsed
+ * into a single fake root yielding every file at top level — the
+ * walker's filename regex handles selection, so depth is irrelevant
+ * for sidecar discovery.
+ */
+function buildFakeDirectoryHandle(name: string, files: File[]): any {
+  return {
+    __fakeFsHandle: true,
+    kind: 'directory',
+    name,
+    async *values() {
+      for (const f of files) {
+        yield {
+          kind: 'file',
+          name: f.name,
+          getFile: async () => f,
+        }
+      }
+    },
   }
-  return null
+}
+
+let fallbackToastShown = false
+
+async function pickDirectoryViaInput(): Promise<any | null> {
+  if (!fallbackToastShown) {
+    fallbackToastShown = true
+    await logseq.UI.showMsg(
+      'Sync Koreader Highlights: this Logseq build blocks the File System Access API in plugin iframes. Falling back to a folder picker — note that the "Remember directory" option will not work on this platform and you will be prompted on every sync.',
+      'warning',
+    )
+  }
+  return await new Promise<any | null>((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    ;(input as any).webkitdirectory = true
+    ;(input as any).directory = true
+    input.multiple = true
+    input.style.position = 'fixed'
+    input.style.left = '-9999px'
+    document.body.appendChild(input)
+
+    let settled = false
+    const finish = (val: any) => {
+      if (settled) return
+      settled = true
+      try { input.remove() } catch {}
+      resolve(val)
+    }
+
+    input.addEventListener('change', () => {
+      const files = Array.from(input.files ?? [])
+      if (files.length === 0) {
+        finish(null)
+        return
+      }
+      const rootName = (files[0] as any).webkitRelativePath?.split('/')[0] || 'KOReader'
+      finish(buildFakeDirectoryHandle(rootName, files))
+    })
+    // Chromium fires `cancel` when the user dismisses the dialog without
+    // picking anything. Older builds may not — the window-focus heuristic
+    // below is a backup so the promise never hangs forever.
+    input.addEventListener('cancel', () => finish(null))
+    const onFocusBackup = () => {
+      setTimeout(() => {
+        if (!settled && (!input.files || input.files.length === 0)) finish(null)
+      }, 500)
+      window.removeEventListener('focus', onFocusBackup)
+    }
+    window.addEventListener('focus', onFocusBackup)
+
+    input.click()
+  })
 }
 
 async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
@@ -204,30 +267,49 @@ async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
     }
   }
   if (!allowPrompt) return null
-  const picker = resolveDirectoryPicker()
+
+  const fsaAvailable = showDirectoryPickerAvailable()
+  const crossOrigin = isCrossOriginIframe()
   console.log(
-    'sync-koreader-highlights: showDirectoryPicker availability —',
-    'self:', typeof (window as any).showDirectoryPicker,
-    'parent:', (() => { try { return typeof (window.parent as any)?.showDirectoryPicker } catch { return 'blocked' } })(),
-    'top:', (() => { try { return typeof (window.top as any)?.showDirectoryPicker } catch { return 'blocked' } })(),
-    'resolved:', picker ? 'yes' : 'no',
+    'sync-koreader-highlights: directory picker mode —',
+    'showDirectoryPicker:', fsaAvailable ? 'present' : 'absent',
+    'crossOriginIframe:', crossOrigin,
   )
-  if (!picker) {
-    await logseq.UI.showMsg(
-      'Sync Koreader Highlights: this Logseq build does not expose the File System Access API to plugins (showDirectoryPicker is unavailable). Please report this with your OS and Logseq version.',
-      'error',
-    )
-    return null
+
+  // File System Access API exists but is blocked in cross-origin iframes
+  // (Chromium throws "Cross origin sub frames aren't allowed to show a
+  // file picker"). On Logseq builds where the plugin iframe is cross-
+  // origin to the host (marketplace install on macOS / Windows), skip
+  // the FSA call entirely so we don't burn the user-activation transient
+  // on a guaranteed failure.
+  if (!fsaAvailable || crossOrigin) {
+    const handle = await pickDirectoryViaInput()
+    if (handle) pickerCache.handle = handle
+    // Deliberately do NOT persist fake handles: File objects inside don't
+    // survive a Logseq restart and the underlying blobs go stale.
+    return handle
   }
+
   try {
-    const handle = await picker()
+    const handle = await (window as any).showDirectoryPicker()
     pickerCache.handle = handle
     if (remember) await persistHandle(handle)
     return handle
   } catch (e: any) {
-    // AbortError = user cancelled the native dialog. Anything else is a real failure.
     if (e?.name === 'AbortError') {
       console.log('sync-koreader-highlights: directory picker cancelled by user')
+      return null
+    }
+    if (e?.name === 'SecurityError') {
+      // crossOrigin probe missed this case (rare — some browsers don't
+      // throw on the document access but still block the picker). Retry
+      // via the <input> fallback. User activation is already consumed,
+      // so the input may not open in this turn; warn the user to retry.
+      console.warn('sync-koreader-highlights: showDirectoryPicker blocked by Permissions Policy; switching to fallback picker', e)
+      await logseq.UI.showMsg(
+        'Sync Koreader Highlights: native picker blocked by Logseq build. Please click the toolbar icon again to use the fallback picker.',
+        'warning',
+      )
       return null
     }
     console.warn('sync-koreader-highlights: directory picker failed', e)
