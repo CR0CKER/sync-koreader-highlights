@@ -6,6 +6,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] – 2026-05-21
+
+### Documentation
+
+- README refreshed for the v0.1.3 in-plugin panel: a new
+  "How it works" section walks through the toolbar → panel →
+  picker → sync flow in plain steps, the stale "currently works
+  on Linux only" warning is removed, the "Status" section
+  reflects the live marketplace listing, and the loading
+  instructions now lead with the marketplace install.
+- Added macOS to the list of explicitly-tested platforms.
+
+(No source changes from 0.1.3.)
+
 ## [0.1.3] – 2026-05-21
 
 ### Fixed
