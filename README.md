@@ -31,20 +31,6 @@ idempotent replace-on-change sync model.
 > trying any new plugin, including this one.** See the [LICENSE](./LICENSE)
 > for the full disclaimer.
 
-> [!WARNING]
-> **Currently works on Linux only.** On macOS and Windows the
-> directory picker fails when the plugin is installed from the
-> Logseq marketplace: Logseq runs marketplace plugins in a
-> cross-origin iframe, which blocks the File System Access API
-> (`showDirectoryPicker`) and also prevents the `<input
-> webkitdirectory>` fallback from receiving the user-activation
-> token needed to open a folder dialog. A fix that renders an
-> activation-bearing button inside the plugin's own iframe is
-> being worked on; tracking issue and progress will be linked here.
-> macOS/Windows users who still want to try the plugin can load it
-> as an unpacked plugin (see [Loading in Logseq](#loading-in-logseq)),
-> which runs same-origin with the host window and avoids the bug.
-
 ## Tested with
 
 - **KOReader 2025.04** on Android (annotations and bookmarks
@@ -58,11 +44,20 @@ idempotent replace-on-change sync model.
 ## Status
 
 Public beta. Working end-to-end against a real Calibre + KOReader
-library. Not yet on the Logseq plugin marketplace; load the
-repository as an unpacked plugin (see
+library. Available on the Logseq plugin marketplace as **Sync
+KOReader Highlights** — open Logseq → ⋯ menu → Plugins →
+Marketplace → search for "KOReader". You can also load the
+repository as an unpacked plugin if you prefer (see
 [Loading in Logseq](#loading-in-logseq) below).
 
 ## Screenshots
+
+The in-plugin sync panel (click the toolbar icon to open). Lists the
+selected KOReader directory, last-sync timestamp, a live sync-progress
+log, and primary actions. Styling honours your active Logseq theme,
+including custom themes from plugins like Awesome Styler:
+
+![Sync panel](docs/screenshots/sync-panel.png)
 
 A book page with KOReader-derived properties (author, tags, summary)
 and the synced highlights below:
@@ -209,12 +204,22 @@ books that gained highlights with per-book counts.
 
 ## Loading in Logseq
 
-1. Plugins → ··· → **Load unpacked plugin** → point at this
-   repository's root directory.
+### From the marketplace (recommended)
+
+1. Plugins → ··· → **Marketplace** → search for "KOReader" →
+   install **Sync KOReader Highlights**.
 2. A book icon appears in the toolbar.
-3. Click it, pick the directory containing your KOReader sidecars
-   (typically your Calibre library or whatever folder Syncthing
-   pulls from your reader).
+3. Click it to open the sync panel, then click
+   **Choose KOReader directory…** and pick the folder containing
+   your KOReader sidecars (typically your Calibre library or
+   whatever folder Syncthing pulls from your reader).
+4. Click **Sync now**.
+
+### As an unpacked plugin (for development)
+
+1. Plugins → ··· → **Load unpacked plugin** → point at this
+   repository's root directory (after `npm run build`).
+2. Same toolbar-icon → panel → pick → sync flow as above.
 
 ## Settings
 
@@ -267,18 +272,29 @@ handle itself lives in IndexedDB under
 
 ## UI
 
-- **Toolbar icon** triggers a sync directly. No modal pops up.
-- **Toasts** (`logseq.UI.showMsg`) report start, completion
-  summary (`Sync done — N new book(s), M new highlight(s), …`),
+- **Toolbar icon** opens an in-plugin sync panel rendered inside
+  the plugin's own iframe. The panel shows the currently-selected
+  directory, the last-sync timestamp, a live progress log, and
+  two buttons: **Choose KOReader directory…** and **Sync now**.
+  Closing the panel (X / backdrop click / ESC) returns to the
+  main Logseq window.
+- The panel matches your active Logseq theme (background, accent,
+  text colours, font) by reading the host's `--ls-*` CSS
+  variables on every open — Awesome Styler customisations
+  propagate automatically.
+- **Toasts** (`logseq.UI.showMsg`) report the completion
+  summary (`Sync done — N new book(s), M new highlight(s), …`)
   and any errors.
 - **Command palette** entries:
-  - `Sync KOReader Highlights: sync now`
+  - `Sync KOReader Highlights: open panel`
   - `Sync KOReader Highlights: reset sync state`
   - `Sync KOReader Highlights: reset and delete all book pages`
   - `Sync KOReader Highlights: forget remembered directory`
   - `Sync KOReader Highlights: reset templates to defaults`
-- All other configuration lives in the standard Logseq plugin
-  settings panel.
+- Mustache templates and auto-sync knobs live in the standard
+  Logseq plugin settings panel — reach them from the panel's
+  footer link ("Open plugin settings…") or the regular
+  Plugins → ⚙ flow.
 
 ## Auto-sync limitations
 
