@@ -6,6 +6,57 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] – 2026-05-21
+
+### Fixed
+
+- **Root cause of the picker + theming failures in packaged
+  installs: missing `"effect": true` in `package.json`.** Without
+  that flag Logseq loaded the plugin into a cross-origin iframe
+  sandbox, which (a) blocked `showDirectoryPicker` by Permissions
+  Policy, (b) stripped user activation from toolbar clicks dispatched
+  through Logseq's command bridge, and (c) made the parent's
+  `--ls-*` CSS variables unreadable from inside the plugin. With
+  `effect: true` Logseq picks the shadow-DOM sandbox, the plugin
+  runs same-origin to the host, and all three issues disappear.
+  v0.1.1 (realm walk) and v0.1.2 (`<input>` fallback) each chased
+  symptoms of the cross-origin restriction without the underlying
+  fix; both code paths remain as safety nets but are no longer the
+  primary picker route.
+- Directory picker now opens reliably on Linux, macOS, and Windows
+  packaged installs. The toolbar icon opens a themed sync panel
+  rendered inside the plugin (mirroring the `logseq-reading-list`
+  plugin's modal); the user clicks a `<button>` inside that panel
+  to choose a directory.
+- Panel styling honours the active Logseq theme via the same
+  parent-CSS-variable read used by the Reading List plugin — Awesome
+  Styler accent and background overrides now apply correctly.
+
+### Changed
+
+- Toolbar icon opens a sync panel instead of triggering a sync
+  directly. The panel shows the currently-selected directory,
+  last-sync timestamp, a live sync-progress log, a "Choose KOReader
+  directory…" button, a "Sync now" button, and a link to the
+  standard Logseq plugin-settings dialog (which still hosts the
+  Mustache template and auto-sync knobs).
+- The "Sync Koreader Highlights: sync now" command-palette entry is
+  replaced with "Sync Koreader Highlights: open panel". The four
+  reset/forget commands are unchanged.
+- Settings copy clarified: "Remember Koreader directory", auto-sync
+  on launch, and the auto-sync interval are all effectively
+  same-origin-only (dev-mode unpacked installs). On packaged
+  installs the directory must be re-selected from the panel each
+  session — `File` blobs from the `<input>` fallback don't survive
+  a Logseq restart.
+
+### Removed
+
+- React and react-dom runtime dependencies (the iframe UI is now
+  vanilla DOM). Also removed `@types/react`, `@types/react-dom`,
+  `@vitejs/plugin-react` devDeps and the React plugin entry in
+  `vite.config.ts`.
+
 ## [0.1.2] – 2026-05-21
 
 ### Fixed

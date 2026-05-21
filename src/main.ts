@@ -10,28 +10,31 @@ import {
 } from './render'
 import { INDEX_PAGE_NAME, resetSyncState, runSync } from './sync'
 import { getBookIdsMap } from './storage'
+import { openPanel as openPanelUI, OpenPanelResult, PanelState, watchTheme } from './panel'
+import pkg from '../package.json'
 
 const PICKER_HANDLE_KEY = 'sync-koreader-highlights:directoryHandle'
+const LAST_SYNC_KEY = 'lastSync'
 
 const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   {
     key: 'rememberDirectory',
     title: 'Remember Koreader directory',
-    description: 'Cache the directory handle so the picker is skipped on subsequent syncs.',
+    description: 'Cache the directory handle so the picker is skipped on subsequent syncs. Only works on Logseq builds that load the plugin same-origin with the host window (typically dev-mode "load unpacked plugin"). On packaged/marketplace installs the plugin runs in a cross-origin iframe and the directory must be re-selected from the panel each session.',
     type: 'boolean',
     default: true,
   },
   {
     key: 'autoSyncOnLaunch',
     title: 'Auto-sync on Logseq launch',
-    description: 'Run a sync once shortly after Logseq starts.',
+    description: 'Run a sync once shortly after Logseq starts. Requires a persisted directory handle (see above); a no-op on packaged installs.',
     type: 'boolean',
     default: false,
   },
   {
     key: 'autoSyncIntervalMinutes',
     title: 'Auto-sync interval (minutes)',
-    description: 'Run a sync automatically every N minutes. Set to 0 to disable. Note: each automatic sync only runs if a directory was previously remembered (otherwise it would prompt for the picker, which is disruptive).',
+    description: 'Run a sync automatically every N minutes. Set to 0 to disable. Each automatic sync only runs if a persisted directory handle is available; a no-op on packaged installs.',
     type: 'number',
     default: 0,
   },
@@ -75,15 +78,6 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
   },
 ]
 
-/**
- * Logseq does not backfill schema defaults onto settings keys that have
- * already been written to the user's settings file (which happens on
- * first plugin load even if the user never opens the settings panel).
- * That leaves the textareas blank in the UI for users upgrading from a
- * prior version where the default was an empty string. On every load,
- * write the shipped default into any template field that's missing or
- * blank so the UI shows an editable starting point.
- */
 function backfillTemplateDefaults(): void {
   const s = logseq.settings ?? {}
   const updates: Record<string, string> = {}
@@ -111,9 +105,6 @@ function loadTemplates(): Templates {
   }
 }
 
-// In-memory cache populated from IndexedDB on bootstrap and on every fresh
-// pick. FileSystemDirectoryHandle is structured-cloneable, so it survives
-// across plugin reloads (and Logseq restarts) when persisted to IDB.
 const pickerCache: { handle: any | null } = { handle: null }
 
 async function loadCachedHandle(): Promise<void> {
@@ -143,16 +134,15 @@ async function clearCachedHandle(): Promise<void> {
 
 /**
  * Detect whether this plugin runs in a cross-origin iframe. Logseq's
- * marketplace install places plugins in a different origin from the
- * host window; dev-mode "load unpacked plugin" usually shares origin
- * with the host. The File System Access API (`showDirectoryPicker`) is
- * blocked from cross-origin iframes by Chromium's Permissions Policy
- * regardless of which realm exposes the function — calling it throws
- * `SecurityError: Cross origin sub frames aren't allowed to show a
- * file picker`. There is no workaround from inside the iframe; the
- * host page would need to set `allow="..."` on our iframe, which we
- * can't control. In that case we fall back to `<input webkitdirectory>`,
- * which only needs a user click and is not gated by Permissions Policy.
+ * packaged/marketplace install runs plugins in a cross-origin iframe;
+ * dev-mode "load unpacked plugin" usually shares origin with the host.
+ * The File System Access API (`showDirectoryPicker`) is blocked from
+ * cross-origin iframes by Chromium's Permissions Policy regardless of
+ * which realm exposes the function, and `<input>.click()` requires
+ * user activation that does not propagate through Logseq's command
+ * bridge. Both work fine when invoked from inside the plugin's own
+ * iframe in response to an in-iframe button click — which is what the
+ * panel UI is for.
  */
 function isCrossOriginIframe(): boolean {
   if (window.top === window.self) return false
@@ -193,17 +183,14 @@ function buildFakeDirectoryHandle(name: string, files: File[]): any {
   }
 }
 
-let fallbackToastShown = false
-
-async function pickDirectoryViaInput(): Promise<any | null> {
-  if (!fallbackToastShown) {
-    fallbackToastShown = true
-    await logseq.UI.showMsg(
-      'Sync Koreader Highlights: this Logseq build blocks the File System Access API in plugin iframes. Falling back to a folder picker — note that the "Remember directory" option will not work on this platform and you will be prompted on every sync.',
-      'warning',
-    )
-  }
-  return await new Promise<any | null>((resolve) => {
+/**
+ * Open a `<input type="file" webkitdirectory>` picker. Must be invoked
+ * synchronously (no awaits) from a real in-iframe user-click event
+ * handler, otherwise Chromium drops the activation transient and the
+ * dialog refuses to open.
+ */
+function pickDirectoryViaInput(): Promise<any | null> {
+  return new Promise<any | null>((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
     ;(input as any).webkitdirectory = true
@@ -230,9 +217,6 @@ async function pickDirectoryViaInput(): Promise<any | null> {
       const rootName = (files[0] as any).webkitRelativePath?.split('/')[0] || 'KOReader'
       finish(buildFakeDirectoryHandle(rootName, files))
     })
-    // Chromium fires `cancel` when the user dismisses the dialog without
-    // picking anything. Older builds may not — the window-focus heuristic
-    // below is a backup so the promise never hangs forever.
     input.addEventListener('cancel', () => finish(null))
     const onFocusBackup = () => {
       setTimeout(() => {
@@ -246,97 +230,98 @@ async function pickDirectoryViaInput(): Promise<any | null> {
   })
 }
 
-async function pickDirectory(allowPrompt: boolean): Promise<any | null> {
-  const remember = !!logseq.settings?.rememberDirectory
-  if (remember && pickerCache.handle) {
-    try {
-      const perm = await pickerCache.handle.queryPermission?.({ mode: 'read' })
-      console.log('sync-koreader-highlights: cached handle permission =', perm, 'allowPrompt=', allowPrompt)
-      if (perm === 'granted') return pickerCache.handle
-      if (!allowPrompt) {
-        // requestPermission requires user activation; calling it from a
-        // background timer or launch hook throws "User activation is required".
-        // Defer to the next time the user clicks the toolbar.
-        return null
-      }
-      const granted = await pickerCache.handle.requestPermission?.({ mode: 'read' })
-      console.log('sync-koreader-highlights: requestPermission =', granted)
-      if (granted === 'granted') return pickerCache.handle
-    } catch (e) {
-      console.warn('sync-koreader-highlights: cached handle permission check failed', e)
-    }
-  }
-  if (!allowPrompt) return null
-
-  const fsaAvailable = showDirectoryPickerAvailable()
-  const crossOrigin = isCrossOriginIframe()
-  console.log(
-    'sync-koreader-highlights: directory picker mode —',
-    'showDirectoryPicker:', fsaAvailable ? 'present' : 'absent',
-    'crossOriginIframe:', crossOrigin,
-  )
-
-  // File System Access API exists but is blocked in cross-origin iframes
-  // (Chromium throws "Cross origin sub frames aren't allowed to show a
-  // file picker"). On Logseq builds where the plugin iframe is cross-
-  // origin to the host (marketplace install on macOS / Windows), skip
-  // the FSA call entirely so we don't burn the user-activation transient
-  // on a guaranteed failure.
-  if (!fsaAvailable || crossOrigin) {
-    const handle = await pickDirectoryViaInput()
-    if (handle) pickerCache.handle = handle
-    // Deliberately do NOT persist fake handles: File objects inside don't
-    // survive a Logseq restart and the underlying blobs go stale.
-    return handle
-  }
-
-  try {
-    const handle = await (window as any).showDirectoryPicker()
-    pickerCache.handle = handle
-    if (remember) await persistHandle(handle)
-    return handle
-  } catch (e: any) {
-    if (e?.name === 'AbortError') {
-      console.log('sync-koreader-highlights: directory picker cancelled by user')
-      return null
-    }
-    if (e?.name === 'SecurityError') {
-      // crossOrigin probe missed this case (rare — some browsers don't
-      // throw on the document access but still block the picker). Retry
-      // via the <input> fallback. User activation is already consumed,
-      // so the input may not open in this turn; warn the user to retry.
-      console.warn('sync-koreader-highlights: showDirectoryPicker blocked by Permissions Policy; switching to fallback picker', e)
-      await logseq.UI.showMsg(
-        'Sync Koreader Highlights: native picker blocked by Logseq build. Please click the toolbar icon again to use the fallback picker.',
-        'warning',
-      )
-      return null
-    }
-    console.warn('sync-koreader-highlights: directory picker failed', e)
-    await logseq.UI.showMsg(
-      `Sync Koreader Highlights: directory picker failed (${e?.name ?? 'Error'}: ${e?.message ?? e}).`,
-      'error',
+/**
+ * Picker for the in-iframe panel button. Always shows the dialog (no
+ * cached-handle short-circuit, no permission re-grant dance) so the
+ * call reaches the picker on the same tick as the user click, which
+ * is what iframe user activation needs.
+ */
+function pickDirectoryFromPanel(): Promise<any | null> {
+  if (showDirectoryPickerAvailable() && !isCrossOriginIframe()) {
+    return (window as any).showDirectoryPicker().then(
+      (handle: any) => handle,
+      (e: any) => {
+        if (e?.name === 'AbortError') return null
+        // Fall back to the input picker. Activation is already consumed
+        // by the failed picker call, so this may not open until the
+        // user clicks the button again — surface a hint.
+        console.warn('sync-koreader-highlights: showDirectoryPicker rejected; falling back to <input>', e)
+        return pickDirectoryViaInput()
+      },
     )
-    return null
   }
+  return pickDirectoryViaInput()
 }
 
 let syncInFlight = false
+let panel: OpenPanelResult | null = null
+const panelState: PanelState = { directoryName: null, lastSync: null }
 
-async function syncNow(allowPrompt: boolean): Promise<void> {
+async function runSyncFromPanel(): Promise<void> {
+  if (!panel) return
   if (syncInFlight) {
-    await logseq.UI.showMsg('Sync Koreader Highlights: a sync is already running.', 'warning')
+    panel.appendLog('A sync is already running.')
+    return
+  }
+  const handle = pickerCache.handle
+  if (!handle) {
+    panel.appendLog('No directory selected — click "Choose KOReader directory…" first.')
+    return
+  }
+  syncInFlight = true
+  panel.setSyncing(true)
+  panel.clearLog()
+  panel.appendLog(`Starting sync against "${handle.name}"…`)
+  try {
+    const info = await logseq.App.getUserConfigs()
+    const result = await runSync({
+      directoryHandle: handle,
+      preferredDateFormat: info.preferredDateFormat,
+      templates: loadTemplates(),
+      onProgress: (msg) => panel?.appendLog(msg),
+    })
+    const newHighlightCount = result.updatedBooks.reduce((a, b) => a + b.addedCount, 0)
+    const summary =
+      `Done — ${result.newBooks.length} new book(s), ` +
+      `${newHighlightCount} new highlight(s), ` +
+      `${result.skippedStubs} stub(s) skipped` +
+      (result.errors.length > 0 ? `, ${result.errors.length} error(s) (see console)` : '.')
+    panel.appendLog(summary)
+    const nowIso = new Date().toISOString()
+    panelState.lastSync = nowIso
+    panel.setLastSync(nowIso)
+    logseq.updateSettings({ [LAST_SYNC_KEY]: nowIso })
+    await logseq.UI.showMsg(summary, result.errors.length > 0 ? 'warning' : 'success')
+  } catch (e: any) {
+    console.error('sync-koreader-highlights: sync failed', e)
+    panel.appendLog(`Sync failed: ${e?.message ?? e}`)
+    await logseq.UI.showMsg(`Sync failed: ${e?.message ?? e}`, 'error')
+  } finally {
+    syncInFlight = false
+    panel.setSyncing(false)
+  }
+}
+
+/**
+ * Background sync entry point. Used by `applyAutoSyncInterval` and
+ * `scheduleLaunchSync`. Only ever runs against a real FSA handle
+ * (fake handles can't survive across plugin reloads anyway). Silent
+ * on failure — there's no user-facing surface to update.
+ */
+async function backgroundSync(): Promise<void> {
+  if (syncInFlight) return
+  const handle = pickerCache.handle
+  if (!handle || handle.__fakeFsHandle) return
+  // Re-grant permission if it lapsed (best-effort; no user activation here).
+  try {
+    const perm = await handle.queryPermission?.({ mode: 'read' })
+    if (perm !== 'granted') return
+  } catch (e) {
+    console.warn('sync-koreader-highlights: background queryPermission threw', e)
     return
   }
   syncInFlight = true
   try {
-    const handle = await pickDirectory(allowPrompt)
-    if (!handle) {
-      // pickDirectory already surfaced any failure/unavailability toast.
-      // Silent user cancellation needs no further message.
-      return
-    }
-    await logseq.UI.showMsg('Sync Koreader Highlights: starting…', 'info')
     const info = await logseq.App.getUserConfigs()
     const result = await runSync({
       directoryHandle: handle,
@@ -344,16 +329,18 @@ async function syncNow(allowPrompt: boolean): Promise<void> {
       templates: loadTemplates(),
       onProgress: (msg) => console.log('sync-koreader-highlights:', msg),
     })
+    const nowIso = new Date().toISOString()
+    panel?.setLastSync(nowIso)
+    logseq.updateSettings({ [LAST_SYNC_KEY]: nowIso })
     const newHighlightCount = result.updatedBooks.reduce((a, b) => a + b.addedCount, 0)
-    const summary =
-      `Sync done — ${result.newBooks.length} new book(s), ` +
-      `${newHighlightCount} new highlight(s), ` +
-      `${result.skippedStubs} stub(s) skipped` +
-      (result.errors.length > 0 ? `, ${result.errors.length} error(s) (see console)` : '.')
-    await logseq.UI.showMsg(summary, result.errors.length > 0 ? 'warning' : 'success')
+    if (result.newBooks.length > 0 || newHighlightCount > 0) {
+      await logseq.UI.showMsg(
+        `Sync done — ${result.newBooks.length} new book(s), ${newHighlightCount} new highlight(s).`,
+        'success',
+      )
+    }
   } catch (e: any) {
-    console.error('sync-koreader-highlights: sync failed', e)
-    await logseq.UI.showMsg(`Sync failed: ${e?.message ?? e}`, 'error')
+    console.error('sync-koreader-highlights: background sync failed', e)
   } finally {
     syncInFlight = false
   }
@@ -370,46 +357,73 @@ function applyAutoSyncInterval(): void {
   if (!Number.isFinite(minutes) || minutes <= 0) return
   const ms = Math.max(1, Math.floor(minutes)) * 60 * 1000
   intervalHandle = window.setInterval(() => {
-    // Background tick: never prompt for a directory, just no-op if none cached.
-    void syncNow(false)
+    void backgroundSync()
   }, ms)
 }
 
+async function openPanel(): Promise<void> {
+  try {
+    panel = await openPanelUI({
+      state: panelState,
+      version: pkg.version,
+      onPick: async () => {
+        const handle = await pickDirectoryFromPanel()
+        if (!handle) return
+        pickerCache.handle = handle
+        panelState.directoryName = handle.name
+        panel?.setDirectory(handle.name)
+        if (logseq.settings?.rememberDirectory && !handle.__fakeFsHandle) {
+          await persistHandle(handle)
+        }
+      },
+      onSync: () => runSyncFromPanel(),
+    })
+  } catch (e) {
+    console.error('sync-koreader-highlights: openPanel failed', e)
+  }
+}
+
 async function bootstrap() {
-  console.log('sync-koreader-highlights: main loaded')
+  console.log('sync-koreader-highlights: main loaded (v' + pkg.version + ')')
   logseq.useSettingsSchema(SETTINGS_SCHEMA)
   backfillTemplateDefaults()
 
   await loadCachedHandle()
 
+  if (pickerCache.handle) panelState.directoryName = pickerCache.handle.name
+  const lastSync = logseq.settings?.[LAST_SYNC_KEY] as string | undefined
+  if (lastSync) panelState.lastSync = lastSync
+
+  watchTheme()
+
   logseq.onSettingsChanged((newSettings: any, oldSettings: any) => {
     applyAutoSyncInterval()
-    // Clearing "Remember Koreader directory" flushes the cached handle.
     if (oldSettings?.rememberDirectory && !newSettings?.rememberDirectory) {
       void clearCachedHandle()
+      panelState.directoryName = null
+      try { panel?.setDirectory(null) } catch { /* dialog rebuilt */ }
     }
   })
 
   logseq.provideModel({
-    syncNow() { void syncNow(true) },
+    openPanel() { openPanel() },
   })
 
   logseq.App.registerUIItem('toolbar', {
     // Logseq uses the toolbar key in CSS selectors for the plugin
     // dropdown's icon lookup; spaces break those selectors and the
-    // entry then renders without an icon. Stick to the
-    // lowercase-hyphen convention used by Readwise et al.
+    // entry then renders without an icon.
     key: 'sync-koreader-highlights',
     template: `
-      <a data-on-click="syncNow" class="button" title="Sync KOReader Highlights">
+      <a data-on-click="openPanel" class="button" title="Sync KOReader Highlights">
         <i class="ti ti-book"></i>
       </a>
     `,
   })
 
   logseq.App.registerCommandPalette(
-    { key: 'sync-koreader-highlights-sync-now', label: 'Sync Koreader Highlights: sync now' },
-    () => { void syncNow(true) },
+    { key: 'sync-koreader-highlights-open-panel', label: 'Sync Koreader Highlights: open panel' },
+    () => { openPanel() },
   )
 
   logseq.App.registerCommandPalette(
@@ -417,6 +431,10 @@ async function bootstrap() {
     async () => {
       await resetSyncState()
       await clearCachedHandle()
+      panelState.directoryName = null
+      panelState.lastSync = null
+      try { panel?.setDirectory(null) } catch { /* dialog rebuilt */ }
+      try { panel?.setLastSync(null) } catch { /* dialog rebuilt */ }
       await logseq.UI.showMsg('Sync Koreader Highlights: sync state reset.', 'success')
     },
   )
@@ -435,6 +453,10 @@ async function bootstrap() {
       }
       await resetSyncState()
       await clearCachedHandle()
+      panelState.directoryName = null
+      panelState.lastSync = null
+      try { panel?.setDirectory(null) } catch { /* dialog rebuilt */ }
+      try { panel?.setLastSync(null) } catch { /* dialog rebuilt */ }
       await logseq.UI.showMsg('Sync Koreader Highlights: reset complete; book pages deleted.', 'success')
     },
   )
@@ -443,6 +465,8 @@ async function bootstrap() {
     { key: 'sync-koreader-highlights-forget-directory', label: 'Sync Koreader Highlights: forget remembered directory' },
     async () => {
       await clearCachedHandle()
+      panelState.directoryName = null
+      try { panel?.setDirectory(null) } catch { /* dialog rebuilt */ }
       await logseq.UI.showMsg('Sync Koreader Highlights: directory cache cleared.', 'success')
     },
   )
@@ -468,30 +492,26 @@ async function bootstrap() {
 }
 
 /**
- * Run the launch sync as soon as it can. Three cases:
- *  1. No cached handle yet → silently no-op (the user hasn't picked a
- *     directory, can't auto-sync without one).
- *  2. Cached handle, permission already granted → sync immediately.
- *  3. Cached handle, permission lapsed (typical after a Logseq restart)
- *     → wait for the next user activation in the Logseq window, then
- *     call requestPermission inside that activation context. Chromium
- *     usually re-grants silently if the user previously approved the
- *     handle, no dialog. Sync fires the instant permission flips to
- *     "granted".
+ * Best-effort auto-sync on launch. Only fires when a real FSA handle
+ * is cached AND its permission can be re-granted without user
+ * activation (Chromium often re-grants silently after previous
+ * approval). Fake handles from the <input> fallback are skipped
+ * because they don't persist across plugin reloads anyway. This path
+ * is effectively dev-mode-only / same-origin-only — packaged installs
+ * never persist a real handle.
  */
 async function scheduleLaunchSync(): Promise<void> {
-  // Tiny delay so the rest of Logseq's UI has settled and toasts are visible.
   await new Promise((r) => setTimeout(r, 1500))
   const handle = pickerCache.handle
-  if (!handle) {
-    console.log('sync-koreader-highlights: launch sync skipped — no cached directory handle')
+  if (!handle || handle.__fakeFsHandle) {
+    console.log('sync-koreader-highlights: launch sync skipped — no real cached handle')
     return
   }
   try {
     const perm = await handle.queryPermission?.({ mode: 'read' })
     console.log('sync-koreader-highlights: launch handle permission =', perm)
     if (perm === 'granted') {
-      void syncNow(false)
+      void backgroundSync()
       return
     }
   } catch (e) {
@@ -499,7 +519,6 @@ async function scheduleLaunchSync(): Promise<void> {
     return
   }
 
-  // Permission has lapsed. Defer the sync to the next user activation.
   console.log('sync-koreader-highlights: deferring launch sync to next user activation')
   let triggered = false
   const onActivation = async () => {
@@ -509,7 +528,7 @@ async function scheduleLaunchSync(): Promise<void> {
       const granted = await handle.requestPermission?.({ mode: 'read' })
       console.log('sync-koreader-highlights: deferred requestPermission =', granted)
       if (granted === 'granted') {
-        void syncNow(false)
+        void backgroundSync()
       }
     } catch (e) {
       console.warn('sync-koreader-highlights: deferred requestPermission threw', e)
@@ -520,21 +539,17 @@ async function scheduleLaunchSync(): Promise<void> {
   const detach = () => {
     window.removeEventListener('pointerdown', onActivation, true)
     window.removeEventListener('keydown', onActivation, true)
-    parent?.removeEventListener?.('pointerdown', onActivation, true)
-    parent?.removeEventListener?.('keydown', onActivation, true)
+    try {
+      window.parent?.removeEventListener?.('pointerdown', onActivation, true)
+      window.parent?.removeEventListener?.('keydown', onActivation, true)
+    } catch { /* cross-origin */ }
   }
-  // Listen on both this iframe's window (the plugin's own UI surface,
-  // largely empty since we removed the modal) and the parent window
-  // (the Logseq main UI, where actual user clicks happen).
   window.addEventListener('pointerdown', onActivation, true)
   window.addEventListener('keydown', onActivation, true)
   try {
     window.parent?.addEventListener('pointerdown', onActivation, true)
     window.parent?.addEventListener('keydown', onActivation, true)
-  } catch {
-    // Cross-origin guards may block this; the in-frame listener still works
-    // because Logseq forwards toolbar/command events into our context.
-  }
+  } catch { /* cross-origin */ }
 }
 
 logseq.ready(bootstrap).catch(console.error)

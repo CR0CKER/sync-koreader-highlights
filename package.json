@@ -2,8 +2,9 @@
   "name": "sync-koreader-highlights",
   "author": "CR0CKER",
   "description": "Sync KOReader sidecar highlights into Logseq, one page per book.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "main": "dist/index.html",
+  "effect": true,
   "homepage": "https://github.com/CR0CKER/sync-koreader-highlights",
   "repository": {
     "type": "git",
@@ -30,17 +31,12 @@
     "date-fns": "^4.1.0",
     "idb-keyval": "^6.2.2",
     "luaparse": "^0.3.1",
-    "mustache": "^4.2.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "mustache": "^4.2.0"
   },
   "devDependencies": {
     "@types/luaparse": "^0.2.12",
     "@types/mustache": "^4.2.5",
     "@types/node": "^20.0.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "@vitejs/plugin-react": "^4.2.0",
     "typescript": "^5.4.0",
     "vite": "^5.4.0",
     "vite-plugin-logseq": "^1.1.2"
