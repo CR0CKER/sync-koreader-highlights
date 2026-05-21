@@ -36,10 +36,10 @@ idempotent replace-on-change sync model.
 - **KOReader 2025.04** on Android (annotations and bookmarks
   written to `metadata.*.lua` sidecars, propagated to the desktop
   via Syncthing or any other file-level sync).
-- **Logseq 0.10.x** on Linux (Asahi Fedora aarch64). The plugin
-  uses only Logseq's standard JS plugin API, so other Logseq
-  desktop builds (Mac, Windows, other Linux distros) are expected
-  to work; they have not been exhaustively tested.
+- **Logseq 0.10.x** on Linux (Asahi Fedora aarch64) and macOS.
+  The plugin uses only Logseq's standard JS plugin API, so
+  Windows and other Linux distros are expected to work too; they
+  have not been exhaustively tested.
 
 ## Status
 
@@ -50,14 +50,29 @@ Marketplace → search for "KOReader". You can also load the
 repository as an unpacked plugin if you prefer (see
 [Loading in Logseq](#loading-in-logseq) below).
 
+## How it works
+
+1. Click the **book icon in the Logseq toolbar** to open the sync
+   panel.
+2. In the panel, click **Choose KOReader directory…** and pick the
+   folder containing your KOReader sidecar `metadata.*.lua` files
+   (typically your Calibre library, or whatever folder Syncthing
+   pulls from your reader).
+3. Click **Sync now**. The progress log streams in the panel; on
+   completion a toast summarises new books and new highlights.
+4. Subsequent syncs reuse the remembered directory — no re-picking
+   unless you click "Choose KOReader directory…" again.
+5. Each sync writes one Logseq page per book, updates the
+   `[[KOReader]]` index page, and adds journal-day backlinks so
+   every highlight surfaces on the day it was made.
+
+Advanced knobs (Mustache templates for the book-page header,
+highlights heading, and per-highlight block; auto-sync interval;
+the directory-handle persistence toggle) live in the standard
+Logseq plugin settings dialog — reach it via the panel footer's
+**Open plugin settings…** link or the regular Plugins → ⚙ flow.
+
 ## Screenshots
-
-The in-plugin sync panel (click the toolbar icon to open). Lists the
-selected KOReader directory, last-sync timestamp, a live sync-progress
-log, and primary actions. Styling honours your active Logseq theme,
-including custom themes from plugins like Awesome Styler:
-
-![Sync panel](docs/screenshots/sync-panel.png)
 
 A book page with KOReader-derived properties (author, tags, summary)
 and the synced highlights below:
