@@ -31,6 +31,20 @@ idempotent replace-on-change sync model.
 > trying any new plugin, including this one.** See the [LICENSE](./LICENSE)
 > for the full disclaimer.
 
+> [!WARNING]
+> **Currently works on Linux only.** On macOS and Windows the
+> directory picker fails when the plugin is installed from the
+> Logseq marketplace: Logseq runs marketplace plugins in a
+> cross-origin iframe, which blocks the File System Access API
+> (`showDirectoryPicker`) and also prevents the `<input
+> webkitdirectory>` fallback from receiving the user-activation
+> token needed to open a folder dialog. A fix that renders an
+> activation-bearing button inside the plugin's own iframe is
+> being worked on; tracking issue and progress will be linked here.
+> macOS/Windows users who still want to try the plugin can load it
+> as an unpacked plugin (see [Loading in Logseq](#loading-in-logseq)),
+> which runs same-origin with the host window and avoids the bug.
+
 ## Tested with
 
 - **KOReader 2025.04** on Android (annotations and bookmarks
