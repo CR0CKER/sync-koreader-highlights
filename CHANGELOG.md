@@ -6,6 +6,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.5] – 2026-05-24
+
+### Fixed
+
+- **"Sync now" now re-grants directory permission after a Logseq
+  restart.** Chromium drops File System Access permissions across
+  sessions even when the directory handle itself is persisted, so
+  clicking Sync after relaunching Logseq used to fail with an
+  opaque error. The Sync button now invokes
+  `requestPermission({mode:'read'})` from the click handler,
+  triggering Chromium's one-tap re-grant prompt. Denials surface a
+  clear in-panel log line and a warning toast instead of a stack
+  trace.
+
 ## [0.1.4] – 2026-05-21
 
 ### Documentation

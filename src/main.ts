@@ -133,6 +133,27 @@ async function clearCachedHandle(): Promise<void> {
 }
 
 /**
+ * Ensure read permission on a real FSA handle. Must be called from a
+ * user-activation context (e.g. the Sync button's click handler) so
+ * Chromium will show its permission prompt when permission has lapsed
+ * across a Logseq restart. Returns true if granted, false otherwise.
+ * Fake input-fallback handles always return true — they hold File
+ * objects directly and need no permission.
+ */
+async function ensureReadPermission(handle: any): Promise<boolean> {
+  if (!handle || handle.__fakeFsHandle) return true
+  try {
+    const current = await handle.queryPermission?.({ mode: 'read' })
+    if (current === 'granted') return true
+    const granted = await handle.requestPermission?.({ mode: 'read' })
+    return granted === 'granted'
+  } catch (e) {
+    console.warn('sync-koreader-highlights: ensureReadPermission threw', e)
+    return false
+  }
+}
+
+/**
  * Detect whether this plugin runs in a cross-origin iframe. Logseq's
  * packaged/marketplace install runs plugins in a cross-origin iframe;
  * dev-mode "load unpacked plugin" usually shares origin with the host.
@@ -268,6 +289,21 @@ async function runSyncFromPanel(): Promise<void> {
     panel.appendLog('No directory selected — click "Choose KOReader directory…" first.')
     return
   }
+  // First await — keep the click's user activation reachable so
+  // Chromium will show the re-grant prompt if permission lapsed
+  // across a Logseq restart.
+  const granted = await ensureReadPermission(handle)
+  if (!granted) {
+    panel.appendLog(
+      `Permission to read "${handle.name}" was not granted. ` +
+      `Click "Choose KOReader directory…" to re-select the folder.`,
+    )
+    await logseq.UI.showMsg(
+      'KOReader directory permission was denied. Re-select the folder from the panel.',
+      'warning',
+    )
+    return
+  }
   syncInFlight = true
   panel.setSyncing(true)
   panel.clearLog()
@@ -312,14 +348,9 @@ async function backgroundSync(): Promise<void> {
   if (syncInFlight) return
   const handle = pickerCache.handle
   if (!handle || handle.__fakeFsHandle) return
-  // Re-grant permission if it lapsed (best-effort; no user activation here).
-  try {
-    const perm = await handle.queryPermission?.({ mode: 'read' })
-    if (perm !== 'granted') return
-  } catch (e) {
-    console.warn('sync-koreader-highlights: background queryPermission threw', e)
-    return
-  }
+  // No user activation here — ensureReadPermission can only succeed
+  // when Chromium silently re-grants (already 'granted').
+  if (!(await ensureReadPermission(handle))) return
   syncInFlight = true
   try {
     const info = await logseq.App.getUserConfigs()
@@ -525,13 +556,11 @@ async function scheduleLaunchSync(): Promise<void> {
     if (triggered) return
     triggered = true
     try {
-      const granted = await handle.requestPermission?.({ mode: 'read' })
-      console.log('sync-koreader-highlights: deferred requestPermission =', granted)
-      if (granted === 'granted') {
+      const granted = await ensureReadPermission(handle)
+      console.log('sync-koreader-highlights: deferred ensureReadPermission =', granted)
+      if (granted) {
         void backgroundSync()
       }
-    } catch (e) {
-      console.warn('sync-koreader-highlights: deferred requestPermission threw', e)
     } finally {
       detach()
     }
