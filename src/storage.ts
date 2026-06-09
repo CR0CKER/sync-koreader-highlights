@@ -9,6 +9,27 @@ const KEY_BOOK_IDS = 'bookIdsMap'
 const KEY_LAST_HIGHLIGHT = 'lastHighlightDatetimeMap'
 const KEY_LAST_SYNC = 'lastSync'
 const KEY_HIGHLIGHT_IDS = 'highlightIdsMap'
+const KEY_BOUND_GRAPH = 'boundGraph'
+
+/** Identity of the one graph this plugin is allowed to write to. `url` is
+ *  Logseq's stable graph identifier (e.g. `logseq_local_/path…`); `name` is
+ *  only for display. Mirrors the relevant fields of `AppGraphInfo`. */
+export interface BoundGraph {
+  name: string
+  url: string
+}
+
+export function getBoundGraph(): BoundGraph | null {
+  return (logseq.settings?.[KEY_BOUND_GRAPH] as BoundGraph | undefined) ?? null
+}
+
+export async function setBoundGraph(graph: BoundGraph): Promise<void> {
+  await logseq.updateSettings({ [KEY_BOUND_GRAPH]: { name: graph.name, url: graph.url } })
+}
+
+export async function clearBoundGraph(): Promise<void> {
+  await logseq.updateSettings({ [KEY_BOUND_GRAPH]: null as any })
+}
 
 export function getBookIdsMap(): Record<string, BookIdEntry> {
   return (logseq.settings?.[KEY_BOOK_IDS] as Record<string, BookIdEntry>) ?? {}

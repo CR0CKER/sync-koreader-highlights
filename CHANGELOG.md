@@ -6,6 +6,31 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] – 2026-06-09
+
+### Fixed
+
+- **The plugin is now tied to a single graph and no longer writes
+  book/highlight pages into whatever graph happens to be open.**
+  Logseq stores plugin settings (and runs sync writes) against the
+  active graph, so opening a different graph and syncing — or letting
+  an automatic/launch sync fire there — used to scatter KOReader pages
+  across unrelated graphs. The plugin now binds to one graph on the
+  first sync and refuses to write to any other.
+
+### Added
+
+- **Graph binding.** The panel shows a "Graph:" row with the bound
+  graph and a **Bind / Re-bind to this graph** button. The first
+  "Sync now" auto-binds the open graph; opening any other graph
+  disables "Sync now" and shows a warning. Background (interval) and
+  launch syncs silently skip when the open graph isn't the bound one.
+  Re-binding to a different graph resets tracked sync state (pages in
+  the previous graph are left untouched for manual cleanup).
+- New command-palette entry **"Sync Koreader Highlights: unbind
+  graph"** to clear the binding; the next sync re-binds to the open
+  graph.
+
 ## [0.1.5] – 2026-05-24
 
 ### Fixed

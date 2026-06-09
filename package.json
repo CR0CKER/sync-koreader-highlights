@@ -2,7 +2,7 @@
   "name": "sync-koreader-highlights",
   "author": "CR0CKER",
   "description": "Sync KOReader sidecar highlights into Logseq, one page per book.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "main": "dist/index.html",
   "effect": true,
   "homepage": "https://github.com/CR0CKER/sync-koreader-highlights",

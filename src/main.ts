@@ -9,7 +9,7 @@ import {
   Templates,
 } from './render'
 import { INDEX_PAGE_NAME, resetSyncState, runSync } from './sync'
-import { getBookIdsMap } from './storage'
+import { BoundGraph, clearBoundGraph, getBookIdsMap, getBoundGraph, setBoundGraph } from './storage'
 import { openPanel as openPanelUI, OpenPanelResult, PanelState, watchTheme } from './panel'
 import pkg from '../package.json'
 
@@ -276,7 +276,66 @@ function pickDirectoryFromPanel(): Promise<any | null> {
 
 let syncInFlight = false
 let panel: OpenPanelResult | null = null
-const panelState: PanelState = { directoryName: null, lastSync: null }
+const panelState: PanelState = {
+  directoryName: null,
+  lastSync: null,
+  boundGraphName: null,
+  currentGraphName: null,
+}
+
+interface GraphInfo {
+  name: string
+  url: string
+}
+
+async function getCurrentGraphInfo(): Promise<GraphInfo | null> {
+  try {
+    const g = await logseq.App.getCurrentGraph()
+    if (!g?.url) return null
+    return { name: g.name ?? g.url, url: g.url }
+  } catch (e) {
+    console.warn('sync-koreader-highlights: getCurrentGraph failed', e)
+    return null
+  }
+}
+
+type GraphGate =
+  | { ok: true; current: GraphInfo; boundJustNow: boolean }
+  | { ok: false; bound: BoundGraph | null; current: GraphInfo | null }
+
+/**
+ * Decide whether the plugin may write to the currently-open graph. The
+ * plugin is tied to a single "bound" graph; every sync write
+ * (createPage etc.) targets whatever graph is active, so we refuse to
+ * sync anywhere but the bound one. The binding is established on the
+ * first manual sync (`bindIfUnbound: true`); background/launch syncs
+ * never auto-bind.
+ */
+async function checkGraphGate(opts: { bindIfUnbound: boolean }): Promise<GraphGate> {
+  const current = await getCurrentGraphInfo()
+  const bound = getBoundGraph()
+  if (!bound) {
+    if (opts.bindIfUnbound && current) {
+      await setBoundGraph(current)
+      return { ok: true, current, boundJustNow: true }
+    }
+    return { ok: false, bound: null, current }
+  }
+  if (current && bound.url === current.url) {
+    return { ok: true, current, boundJustNow: false }
+  }
+  return { ok: false, bound, current }
+}
+
+/** Refresh the panel's graph indicator from live state. Safe to call
+ *  when no panel is open. */
+async function refreshPanelGraph(): Promise<void> {
+  const current = await getCurrentGraphInfo()
+  const bound = getBoundGraph()
+  panelState.boundGraphName = bound?.name ?? null
+  panelState.currentGraphName = current?.name ?? null
+  try { panel?.setGraphInfo(panelState.boundGraphName, panelState.currentGraphName) } catch { /* dialog rebuilt */ }
+}
 
 async function runSyncFromPanel(): Promise<void> {
   if (!panel) return
@@ -289,9 +348,29 @@ async function runSyncFromPanel(): Promise<void> {
     panel.appendLog('No directory selected — click "Choose KOReader directory…" first.')
     return
   }
-  // First await — keep the click's user activation reachable so
-  // Chromium will show the re-grant prompt if permission lapsed
-  // across a Logseq restart.
+  // Graph gate first (a fast App API read). Binds to the current graph
+  // on the very first sync; refuses to write to any other graph after.
+  const gate = await checkGraphGate({ bindIfUnbound: true })
+  if (!gate.ok) {
+    const boundName = gate.bound?.name ?? '?'
+    const currentName = gate.current?.name ?? '?'
+    panel.appendLog(
+      `Bound to graph "${boundName}", but "${currentName}" is open. ` +
+      `Switch to the bound graph, or click "Re-bind to this graph" to move the binding.`,
+    )
+    await logseq.UI.showMsg(
+      `KOReader sync is bound to graph "${boundName}". Open it, or re-bind from the panel.`,
+      'warning',
+    )
+    await refreshPanelGraph()
+    return
+  }
+  if (gate.boundJustNow) {
+    panel.appendLog(`Bound KOReader sync to graph "${gate.current.name}".`)
+    await refreshPanelGraph()
+  }
+  // Keep the click's user activation reachable so Chromium will show
+  // the re-grant prompt if permission lapsed across a Logseq restart.
   const granted = await ensureReadPermission(handle)
   if (!granted) {
     panel.appendLog(
@@ -348,6 +427,13 @@ async function backgroundSync(): Promise<void> {
   if (syncInFlight) return
   const handle = pickerCache.handle
   if (!handle || handle.__fakeFsHandle) return
+  // Never auto-bind in the background — only sync if the open graph is
+  // already the bound graph.
+  const gate = await checkGraphGate({ bindIfUnbound: false })
+  if (!gate.ok) {
+    console.log('sync-koreader-highlights: background sync skipped — not the bound graph')
+    return
+  }
   // No user activation here — ensureReadPermission can only succeed
   // when Chromium silently re-grants (already 'granted').
   if (!(await ensureReadPermission(handle))) return
@@ -392,8 +478,34 @@ function applyAutoSyncInterval(): void {
   }, ms)
 }
 
+/**
+ * Bind (or re-bind) the plugin to the currently-open graph. When moving
+ * the binding to a *different* graph, the shared sync-state maps
+ * (bookIdsMap etc.) describe the old graph's pages, so reset them; pages
+ * already written in the old graph are left untouched for manual cleanup.
+ */
+async function rebindToCurrentGraph(): Promise<void> {
+  const current = await getCurrentGraphInfo()
+  if (!current) {
+    await logseq.UI.showMsg('Could not read the current graph.', 'error')
+    return
+  }
+  const prev = getBoundGraph()
+  const changed = !!prev && prev.url !== current.url
+  await setBoundGraph(current)
+  if (changed) {
+    await resetSyncState()
+    panel?.appendLog(`Re-bound to "${current.name}". Tracked sync state was reset (pages in "${prev!.name}" left as-is).`)
+  } else {
+    panel?.appendLog(`Bound KOReader sync to graph "${current.name}".`)
+  }
+  await refreshPanelGraph()
+  await logseq.UI.showMsg(`KOReader sync bound to graph "${current.name}".`, 'success')
+}
+
 async function openPanel(): Promise<void> {
   try {
+    await refreshPanelGraph()
     panel = await openPanelUI({
       state: panelState,
       version: pkg.version,
@@ -408,7 +520,10 @@ async function openPanel(): Promise<void> {
         }
       },
       onSync: () => runSyncFromPanel(),
+      onRebind: () => rebindToCurrentGraph(),
     })
+    // Apply the freshly-read graph state to the just-built dialog.
+    panel.setGraphInfo(panelState.boundGraphName, panelState.currentGraphName)
   } catch (e) {
     console.error('sync-koreader-highlights: openPanel failed', e)
   }
@@ -426,6 +541,17 @@ async function bootstrap() {
   if (lastSync) panelState.lastSync = lastSync
 
   watchTheme()
+
+  const boundGraph = getBoundGraph()
+  if (boundGraph) panelState.boundGraphName = boundGraph.name
+  const initialGraph = await getCurrentGraphInfo()
+  if (initialGraph) panelState.currentGraphName = initialGraph.name
+
+  try {
+    logseq.App.onCurrentGraphChanged(() => { void refreshPanelGraph() })
+  } catch (e) {
+    console.warn('sync-koreader-highlights: onCurrentGraphChanged subscription failed', e)
+  }
 
   logseq.onSettingsChanged((newSettings: any, oldSettings: any) => {
     applyAutoSyncInterval()
@@ -503,6 +629,15 @@ async function bootstrap() {
   )
 
   logseq.App.registerCommandPalette(
+    { key: 'sync-koreader-highlights-unbind-graph', label: 'Sync Koreader Highlights: unbind graph' },
+    async () => {
+      await clearBoundGraph()
+      await refreshPanelGraph()
+      await logseq.UI.showMsg('Sync Koreader Highlights: graph unbound. Next sync re-binds to the open graph.', 'success')
+    },
+  )
+
+  logseq.App.registerCommandPalette(
     { key: 'sync-koreader-highlights-reset-templates', label: 'Sync Koreader Highlights: reset templates to defaults' },
     async () => {
       await logseq.updateSettings({
@@ -536,6 +671,12 @@ async function scheduleLaunchSync(): Promise<void> {
   const handle = pickerCache.handle
   if (!handle || handle.__fakeFsHandle) {
     console.log('sync-koreader-highlights: launch sync skipped — no real cached handle')
+    return
+  }
+  // Skip cleanly when the open graph isn't the bound one, so we don't
+  // register activation listeners or prompt for permission off-target.
+  if (!(await checkGraphGate({ bindIfUnbound: false })).ok) {
+    console.log('sync-koreader-highlights: launch sync skipped — not the bound graph')
     return
   }
   try {

@@ -159,11 +159,14 @@ export function watchTheme(): void {
 export interface PanelState {
   directoryName: string | null
   lastSync: string | null
+  boundGraphName: string | null
+  currentGraphName: string | null
 }
 
 export interface PanelHandlers {
   onPick: () => void | Promise<void>
   onSync: () => void | Promise<void>
+  onRebind: () => void | Promise<void>
 }
 
 export interface OpenPanelArgs extends PanelHandlers {
@@ -177,7 +180,14 @@ export interface OpenPanelResult {
   setSyncing(syncing: boolean): void
   setDirectory(name: string | null): void
   setLastSync(iso: string | null): void
+  setGraphInfo(boundName: string | null, currentName: string | null): void
   close(): void
+}
+
+/** True when the open graph is the bound graph (or nothing is bound yet, in
+ *  which case the first sync will bind it). */
+function graphMatches(boundName: string | null, currentName: string | null): boolean {
+  return !boundName || boundName === currentName
 }
 
 function esc(s: string): string {
@@ -199,11 +209,19 @@ function fmtLastSync(iso: string | null): string {
 export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
   await applyTheme()
 
-  const { state, version, onPick, onSync } = args
+  const { state, version, onPick, onSync, onRebind } = args
   const dirText = state.directoryName ? esc(state.directoryName) : 'No directory selected'
   const dirClass = state.directoryName ? 'skh-dir' : 'skh-muted'
   const lastSyncText = fmtLastSync(state.lastSync)
   const lastSyncClass = state.lastSync ? '' : 'skh-muted'
+  const graphText = state.boundGraphName ? esc(state.boundGraphName) : 'not bound (binds on first sync)'
+  const graphClass = state.boundGraphName ? 'skh-dir' : 'skh-muted'
+  const matches = graphMatches(state.boundGraphName, state.currentGraphName)
+  const warnText = matches
+    ? ''
+    : `Open graph "${esc(state.currentGraphName ?? '?')}" is not the bound graph — sync is disabled here.`
+  const rebindLabel = state.boundGraphName ? 'Re-bind to this graph' : 'Bind to this graph'
+  const syncDisabled = !state.directoryName || !matches
 
   const appHtml = `
     <dialog id="skhDialog" class="skh-dialog">
@@ -213,11 +231,14 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
       </div>
       <div class="skh-status">
         <div>Directory: <span id="skhDir" class="${dirClass}">${dirText}</span></div>
+        <div>Graph: <span id="skhGraph" class="${graphClass}">${graphText}</span></div>
         <div>Last sync: <span id="skhLastSync" class="${lastSyncClass}">${lastSyncText}</span></div>
+        <div id="skhGraphWarn" class="skh-warn"${matches ? ' hidden' : ''}>${warnText}</div>
       </div>
       <div class="skh-actions">
         <button id="skhPick" class="skh-btn" type="button">Choose KOReader directory…</button>
-        <button id="skhSync" class="skh-primary" type="button"${state.directoryName ? '' : ' disabled'}>Sync now</button>
+        <button id="skhRebind" class="skh-btn" type="button">${rebindLabel}</button>
+        <button id="skhSync" class="skh-primary" type="button"${syncDisabled ? ' disabled' : ''}>Sync now</button>
       </div>
       <pre id="skhLog" class="skh-log" aria-live="polite"></pre>
       <div class="skh-foot">
@@ -232,8 +253,11 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
 
   const dialog = document.getElementById('skhDialog') as HTMLDialogElement
   const dirSpan = document.getElementById('skhDir') as HTMLSpanElement
+  const graphSpan = document.getElementById('skhGraph') as HTMLSpanElement
+  const graphWarn = document.getElementById('skhGraphWarn') as HTMLDivElement
   const lastSyncSpan = document.getElementById('skhLastSync') as HTMLSpanElement
   const pickBtn = document.getElementById('skhPick') as HTMLButtonElement
+  const rebindBtn = document.getElementById('skhRebind') as HTMLButtonElement
   const syncBtn = document.getElementById('skhSync') as HTMLButtonElement
   const closeBtn = document.getElementById('skhClose') as HTMLButtonElement
   const logEl = document.getElementById('skhLog') as HTMLPreElement
@@ -243,6 +267,7 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
   // activation must reach showDirectoryPicker / input.click() in the
   // same task as the user's click.
   pickBtn.addEventListener('click', () => { void onPick() })
+  rebindBtn.addEventListener('click', () => { void onRebind() })
   syncBtn.addEventListener('click', () => { void onSync() })
   closeBtn.addEventListener('click', () => { if (dialog.open) dialog.close() })
   openSettings.addEventListener('click', () => {
@@ -259,6 +284,7 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
 
   let currentDir = state.directoryName
   let syncing = false
+  let graphOk = matches
 
   return {
     appendLog(line) {
@@ -268,8 +294,9 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
     clearLog() { logEl.textContent = '' },
     setSyncing(s) {
       syncing = s
-      syncBtn.disabled = syncing || !currentDir
+      syncBtn.disabled = syncing || !currentDir || !graphOk
       pickBtn.disabled = syncing
+      rebindBtn.disabled = syncing
       syncBtn.textContent = syncing ? 'Syncing…' : 'Sync now'
     },
     setDirectory(name) {
@@ -281,11 +308,31 @@ export async function openPanel(args: OpenPanelArgs): Promise<OpenPanelResult> {
         dirSpan.textContent = 'No directory selected'
         dirSpan.className = 'skh-muted'
       }
-      syncBtn.disabled = syncing || !currentDir
+      syncBtn.disabled = syncing || !currentDir || !graphOk
     },
     setLastSync(iso) {
       lastSyncSpan.textContent = fmtLastSync(iso)
       lastSyncSpan.className = iso ? '' : 'skh-muted'
+    },
+    setGraphInfo(boundName, currentName) {
+      graphOk = graphMatches(boundName, currentName)
+      if (boundName) {
+        graphSpan.textContent = boundName
+        graphSpan.className = 'skh-dir'
+      } else {
+        graphSpan.textContent = 'not bound (binds on first sync)'
+        graphSpan.className = 'skh-muted'
+      }
+      rebindBtn.textContent = boundName ? 'Re-bind to this graph' : 'Bind to this graph'
+      if (graphOk) {
+        graphWarn.hidden = true
+        graphWarn.textContent = ''
+      } else {
+        graphWarn.hidden = false
+        graphWarn.textContent =
+          `Open graph "${currentName ?? '?'}" is not the bound graph — sync is disabled here.`
+      }
+      syncBtn.disabled = syncing || !currentDir || !graphOk
     },
     close() { if (dialog.open) dialog.close() },
   }
