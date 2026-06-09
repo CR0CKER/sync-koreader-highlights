@@ -72,6 +72,30 @@ the directory-handle persistence toggle) live in the standard
 Logseq plugin settings dialog — reach it via the panel footer's
 **Open plugin settings…** link or the regular Plugins → ⚙ flow.
 
+## Multiple graphs
+
+The plugin writes to a **single graph**, chosen the first time you
+sync. Logseq runs every plugin against whichever graph is currently
+open, so without a guard a sync — or an automatic/launch sync — fired
+while a *different* graph was open would scatter KOReader book pages
+across unrelated graphs.
+
+To prevent that, the plugin **binds to one graph on the first sync** and
+refuses to write anywhere else:
+
+- The sync panel shows a **Graph** row with the bound graph's name and a
+  **Bind / Re-bind to this graph** button.
+- The first **Sync now** binds the currently-open graph automatically.
+- Open a *different* graph and **Sync now** is disabled with a warning;
+  background-interval and launch syncs silently skip.
+- Click **Re-bind to this graph** to move the binding to the open graph.
+  Because the per-book tracking state describes the previously-bound
+  graph, re-binding resets that state — pages already written in the old
+  graph are left untouched for you to remove manually (e.g. via
+  *reset and delete all book pages* while that graph is open).
+- The `Sync KOReader Highlights: unbind graph` command clears the
+  binding; the next sync re-binds to whatever graph is open.
+
 ## Screenshots
 
 A book page with KOReader-derived properties (author, tags, summary)
@@ -280,19 +304,21 @@ In Logseq → Plugins → Sync KOReader Highlights → ⚙:
   `{{isBookmark}}`.
 
 State maps (`bookIdsMap`, `highlightIdsMap`,
-`lastHighlightDatetimeMap`, `lastSync`) are stored in
-`logseq.settings` and not exposed in the UI. The directory
-handle itself lives in IndexedDB under
-`sync-koreader-highlights:directoryHandle`.
+`lastHighlightDatetimeMap`, `lastSync`) plus the bound-graph
+record (`boundGraph`) are stored in `logseq.settings` and not
+exposed in the UI. The directory handle itself lives in IndexedDB
+under `sync-koreader-highlights:directoryHandle`.
 
 ## UI
 
 - **Toolbar icon** opens an in-plugin sync panel rendered inside
   the plugin's own iframe. The panel shows the currently-selected
-  directory, the last-sync timestamp, a live progress log, and
-  two buttons: **Choose KOReader directory…** and **Sync now**.
-  Closing the panel (X / backdrop click / ESC) returns to the
-  main Logseq window.
+  directory, the **bound graph**, the last-sync timestamp, a live
+  progress log, and three buttons: **Choose KOReader directory…**,
+  **Bind / Re-bind to this graph**, and **Sync now** (disabled when
+  the open graph isn't the bound one — see
+  [Multiple graphs](#multiple-graphs)). Closing the panel
+  (X / backdrop click / ESC) returns to the main Logseq window.
 - The panel matches your active Logseq theme (background, accent,
   text colours, font) by reading the host's `--ls-*` CSS
   variables on every open — Awesome Styler customisations
@@ -305,6 +331,7 @@ handle itself lives in IndexedDB under
   - `Sync KOReader Highlights: reset sync state`
   - `Sync KOReader Highlights: reset and delete all book pages`
   - `Sync KOReader Highlights: forget remembered directory`
+  - `Sync KOReader Highlights: unbind graph`
   - `Sync KOReader Highlights: reset templates to defaults`
 - Mustache templates and auto-sync knobs live in the standard
   Logseq plugin settings panel — reach them from the panel's
