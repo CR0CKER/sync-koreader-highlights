@@ -358,9 +358,9 @@ fires only when permission is currently granted in this session.
 
 ## Build
 
-System Node 22+ (the project uses Vite 5 + React 18 +
-TypeScript). On Asahi Fedora aarch64, an x86-64 nvm install can
-shadow the right binary, so:
+System Node 22+ (the project uses Vite 5 + TypeScript; vanilla
+DOM, no UI framework). On Asahi Fedora aarch64, an x86-64 nvm
+install can shadow the right binary, so:
 
 ```sh
 PATH=/usr/bin:$PATH /usr/bin/npm install
@@ -368,15 +368,19 @@ PATH=/usr/bin:$PATH /usr/bin/npm run build
 ```
 
 Output lands in `dist/` (one `index.html` + one bundled JS
-asset, ≈165 KB).
+asset, ≈180 KB).
 
 ## Architecture
 
 ```
 src/
-  main.tsx     — Logseq plugin lifecycle, settings schema,
+  main.ts      — Logseq plugin lifecycle, settings schema,
                  toolbar, command palette, picker (with IDB
-                 persistence), launch-sync activation deferral.
+                 persistence), launch-sync activation deferral,
+                 and the single-graph binding gate.
+  panel.ts     — The in-iframe sync panel: vanilla-DOM dialog,
+                 host-theme (`--ls-*`) mirroring, and the
+                 directory / graph / progress UI.
   sync.ts      — Sync engine: walk → parse → diff against state
                  maps → createPage / rebuildHighlightsSection /
                  writeIndexReceipt.
@@ -390,14 +394,15 @@ src/
                  decoder; page-name and property-value
                  sanitisers; KOReader datetime parser.
   storage.ts   — Typed wrappers around `logseq.settings` for
-                 the four state maps. Reset writes per-key
-                 nulls before the top-level null overwrite,
-                 since Logseq's `updateSettings` deep-merges and
-                 `{key: {}}` is a no-op.
+                 the state maps and the bound-graph record.
+                 Reset writes per-key nulls before the top-level
+                 null overwrite, since Logseq's `updateSettings`
+                 deep-merges and `{key: {}}` is a no-op.
 ```
 
 Runtime deps: `@logseq/libs`, `luaparse`, `mustache`,
-`date-fns`, `idb-keyval`. About 1100 lines of source.
+`date-fns`, `idb-keyval`. About 2300 lines of source across six
+TypeScript modules; no UI framework (vanilla DOM).
 
 ## Privacy
 
