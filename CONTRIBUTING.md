@@ -38,12 +38,20 @@ Logseq:
    root.
 2. Reload after every rebuild (toggle the plugin off and on).
 
-There is no automated test suite yet. End-to-end testing means
-syncing against a small KOReader directory and inspecting the
-produced Logseq pages and console output. The
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) workflow
-runs `npm run build` on every push and PR; if that fails, the
-change won't merge until the build is green.
+A Vitest suite covers the pure parse/render layer — run it (and the
+type-checker) locally with:
+
+```sh
+PATH=/usr/bin:$PATH /usr/bin/npm run typecheck
+PATH=/usr/bin:$PATH /usr/bin/npm test
+```
+
+Full end-to-end testing still means syncing against a small KOReader
+directory and inspecting the produced Logseq pages and console output.
+CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml) +
+[`security.yml`](./.github/workflows/security.yml)) runs type-check,
+build, unit tests, semgrep SAST, and gitleaks on every push and PR;
+all are required checks, so a change won't merge until they're green.
 
 ## Pull requests
 
