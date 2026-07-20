@@ -4,6 +4,10 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Hold freshly-published releases for a few days so a compromised
+    # version can't reach us the moment it lands (supply-chain cooldown).
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -16,5 +20,7 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     labels:
       - dependencies

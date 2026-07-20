@@ -1,6 +1,6 @@
 # Sync KOReader Highlights
 
-Last updated: 2026-07-20 05:31 AM CDT
+Last updated: 2026-07-20 05:49 AM CDT
 
 [![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
@@ -404,6 +404,25 @@ Tests cover the pure parse/render layer (`src/sidecar.ts`,
 `src/render.ts`) via `src/*.test.ts` — no `logseq` global or DOM
 needed. Vitest uses its own `vitest.config.ts` (not `vite.config.ts`,
 whose `vite-plugin-logseq` only runs in the dev-server path).
+
+CI also runs two security gates (`.github/workflows/security.yml`),
+both in digest-pinned containers — reproduce them with any OCI runtime
+(`docker` or `podman`):
+
+```sh
+# SAST — fails on any finding
+podman run --rm -v "$PWD":/src:z -w /src semgrep/semgrep:1.169.0 \
+  semgrep scan --config p/security-audit --config p/javascript \
+  --config p/typescript --config p/owasp-top-ten --config p/github-actions \
+  --exclude node_modules --exclude dist --error
+
+# Secrets across full git history + tree
+podman run --rm -v "$PWD":/repo zricethezav/gitleaks:v8.30.1 git /repo
+```
+
+These complement GitHub's own secret scanning + push protection and the
+Dependabot alerts — each covers the others' blind spots (SAST finds code
+bugs, gitleaks finds committed secrets, Dependabot finds vulnerable deps).
 
 ## Architecture
 
