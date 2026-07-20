@@ -1,0 +1,82 @@
+name: logseq-libs-watch
+
+# Monthly check: has @logseq/libs published a stable `latest` past the version
+# this repo pins? A newer stable release is the re-rating trigger in
+# docs/adr/0001-dependency-vulnerability-posture.md — it's what would let us
+# clear the vendored dompurify/lodash-es advisories for real (instead of the
+# dismissed-as-unreachable posture). When one appears, open a tracking issue.
+#
+# Deliberately compares the `latest` dist-tag only, NOT `next` — the ADR
+# rejects the 0.3.4 `next` pre-release major. Dependabot's monthly npm
+# version-updates would also PR a new `latest`; this issue adds the CVE-unblock
+# context and a single, labelled signal.
+
+on:
+  schedule:
+    - cron: '0 9 1 * *' # 09:00 UTC on the 1st of each month
+  workflow_dispatch: {}  # allow manual runs
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PKG: '@logseq/libs'
+      LABEL: logseq-libs-update
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare pinned vs. npm `latest`
+        id: cmp
+        run: |
+          set -euo pipefail
+          # Pinned version from package.json (strip a leading ^ or ~).
+          pinned="$(node -p "require('./package.json').dependencies['$PKG'].replace(/^[^0-9]*/, '')")"
+          # Stable `latest` from the npm registry (never the `next` tag).
+          latest="$(npm view "$PKG" version)"
+          echo "pinned=$pinned"  >> "$GITHUB_OUTPUT"
+          echo "latest=$latest"  >> "$GITHUB_OUTPUT"
+          if [ "$pinned" = "$latest" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "pinned=$pinned latest=$latest"
+
+      - name: Ensure the tracking label exists
+        if: steps.cmp.outputs.up_to_date == 'false'
+        run: |
+          set -euo pipefail
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" \
+            --color BFD4F2 --description "@logseq/libs has a newer stable release" \
+            2>/dev/null || true
+
+      - name: Open a tracking issue (idempotent)
+        if: steps.cmp.outputs.up_to_date == 'false'
+        env:
+          PINNED: ${{ steps.cmp.outputs.pinned }}
+          LATEST: ${{ steps.cmp.outputs.latest }}
+        run: |
+          set -euo pipefail
+          # Skip if an open issue with this label already exists — don't spam
+          # a new one every month until the bump is done.
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --state open --label "$LABEL" --json number --jq 'length')"
+          if [ "$existing" != "0" ]; then
+            echo "An open $LABEL issue already exists; nothing to do."
+            exit 0
+          fi
+          # Substitute the version placeholders into the issue-body template
+          # (kept as a file so the markdown never has to survive YAML quoting).
+          body="$(sed -e "s/__PINNED__/$PINNED/g" -e "s/__LATEST__/$LATEST/g" \
+            .github/logseq-libs-watch-issue.md)"
+          gh issue create --repo "$GITHUB_REPOSITORY" --label "$LABEL" \
+            --title "@logseq/libs $LATEST is out (pinned: $PINNED) — evaluate the security bump" \
+            --body "$body"
