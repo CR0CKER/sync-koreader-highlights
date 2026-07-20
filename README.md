@@ -1,6 +1,6 @@
 # Sync KOReader Highlights
 
-Last updated: 2026-07-20 05:18 AM CDT
+Last updated: 2026-07-20 05:31 AM CDT
 
 [![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
@@ -71,6 +71,16 @@ repository as an unpacked plugin if you prefer (see
 5. Each sync writes one Logseq page per book, updates the
    `[[KOReader]]` index page, and adds journal-day backlinks so
    every highlight surfaces on the day it was made.
+
+> **⚠️ Don't edit highlights in place.** The plugin keeps each book's
+> highlights in lockstep with KOReader by **rebuilding the entire
+> `Highlights synced from …` block on every change-bearing sync** — so
+> any edits you make *inside* that block (rewording a quote, tweaking a
+> `date::`) are overwritten the next time that book's highlights change on
+> the device. This is deliberate: it's how highlights you delete on the
+> reader also disappear from Logseq. Anything you write **outside** that
+> block — elsewhere on the book page, in child blocks of your own, on the
+> journal day — is never touched. Put your own notes there.
 
 Advanced knobs (Mustache templates for the book-page header,
 highlights heading, and per-highlight block; auto-sync interval;
@@ -307,7 +317,12 @@ In Logseq → Plugins → Sync KOReader Highlights → ⚙:
   Variables: `{{text}}`, `{{date}}`, `{{dateUpdated}}`,
   `{{chapter}}`, `{{page}}`, `{{note}}`, plus boolean
   discriminators `{{isHighlight}}`, `{{isNote}}`,
-  `{{isBookmark}}`.
+  `{{isBookmark}}`. **A custom heading or block template's output is
+  written to the block verbatim** — KOReader values are interpolated
+  raw, with no HTML/markdown escaping, so a custom template owns any
+  escaping its content needs. (The defaults never render raw: book
+  properties and default highlight blocks go through Logseq's escaped
+  structured-properties API.)
 
 State maps (`bookIdsMap`, `highlightIdsMap`,
 `lastHighlightDatetimeMap`, `lastSync`) plus the bound-graph

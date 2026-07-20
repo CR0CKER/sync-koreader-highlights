@@ -18,6 +18,26 @@ versions follow [Semantic Versioning](https://semver.org/).
   not taken (unreachable from this plugin; would need manual Logseq QA).
   See [`docs/adr/0001-dependency-vulnerability-posture.md`](docs/adr/0001-dependency-vulnerability-posture.md).
 
+### Added
+
+- Monthly `logseq-libs-watch` GitHub Actions workflow that compares the
+  pinned `@logseq/libs` against npm's stable `latest` (never the `next`
+  pre-release) and opens a single tracking issue when a newer stable
+  release appears — the re-rating trigger from ADR 0001 that would let us
+  fix the vendored `dompurify`/`lodash-es` advisories for real.
+
+### Changed
+
+- Documented that a **custom** highlight-block or heading template renders
+  verbatim (no HTML/markdown escaping) so the user owns escaping — in the
+  code, the two settings descriptions, and the README (audit L2). The
+  default templates are unaffected (they use Logseq's escaped
+  structured-properties API).
+- README now warns prominently that highlights under the
+  `Highlights synced from …` block are rebuilt on every change-bearing
+  sync and must not be edited in place — put your own notes outside that
+  block (audit L3).
+
 ### Fixed
 
 - Restore type-checking: `tsc --noEmit` was failing with 8 errors and was

@@ -374,7 +374,19 @@ function stripHtmlTags(s: string): string {
 }
 
 function renderTemplate(template: string, view: Record<string, any>): string {
-  // Disable HTML escaping; Logseq blocks want raw markdown.
+  // Disable Mustache's default HTML-entity escaping: Logseq blocks are
+  // markdown, not HTML, so `"` / `&` / `<` must pass through verbatim or
+  // titles and notes render as `&quot;` etc.
+  //
+  // Consequence (audit L2): on the CUSTOM highlight-block / heading path,
+  // KOReader-derived values (`text`, `note`, `chapter`, …) are interpolated
+  // into the user's own template raw — no escaping. The blast radius is nil
+  // (a user's own template, their own highlights, rendered in their own
+  // graph — Logseq sanitises HTML at render time), but a custom template is
+  // therefore responsible for any markdown it wants neutralised. The DEFAULT
+  // templates never take this path: book properties go through the structured
+  // `createPage` API and highlight blocks through `IBatchBlock.properties`,
+  // both of which Logseq escapes natively.
   const out = Mustache.render(template, view, undefined, { escape: (v: string) => v })
   return collapseEmptyLines(out)
 }

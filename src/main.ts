@@ -59,7 +59,9 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
     description:
       'Mustache template for the heading block above each book\'s highlights. ' +
       'Re-rendered on every sync so its date stays current. ' +
-      'Variables: {{date}}, {{kind}} ("initial sync" or "sync").',
+      'Variables: {{date}}, {{kind}} ("initial sync" or "sync"). ' +
+      'Note: a custom template\'s output is written to the block verbatim (no ' +
+      'HTML/markdown escaping) — you own any escaping it needs.',
     type: 'string',
     inputAs: 'textarea',
     default: DEFAULT_HIGHLIGHTS_HEADING_TEMPLATE,
@@ -71,6 +73,8 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
       'Mustache template for each highlight block on a book page. ' +
       'When left at the default, the plugin uses Logseq\'s structured-properties API for safer rendering. ' +
       'Modify to take full control of the block content (text + inline `key:: value` properties). ' +
+      'Note: once customised, your template\'s output is written verbatim — highlight text and notes are ' +
+      'interpolated raw with no HTML/markdown escaping, so you own any escaping the content needs. ' +
       'Variables: {{text}}, {{date}}, {{dateUpdated}}, {{chapter}}, {{page}}, {{note}}.',
     type: 'string',
     inputAs: 'textarea',
