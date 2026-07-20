@@ -6,6 +6,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Cleared 5 dev/build-toolchain advisories (vite dev-server request
+  exposure, esbuild dev-server SSRF, and the vitest/vite-node/@vitest-mocker
+  chain) by bumping `vite` 5 → 7 and `vitest` 2 → 4. Both are dev-only and
+  never reach the shipped `dist/` bundle; the build (unchanged output) and
+  the 32-test suite validate the bump. The remaining 3 advisories are
+  vendored inside `@logseq/libs@0.0.17` (`dompurify`, `lodash-es`), whose
+  only fix is the `@logseq/libs@0.3.4` **pre-release** major — deliberately
+  not taken (unreachable from this plugin; would need manual Logseq QA).
+  See [`docs/adr/0001-dependency-vulnerability-posture.md`](docs/adr/0001-dependency-vulnerability-posture.md).
+
 ### Fixed
 
 - Restore type-checking: `tsc --noEmit` was failing with 8 errors and was

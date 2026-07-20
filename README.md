@@ -1,6 +1,6 @@
 # Sync KOReader Highlights
 
-Last updated: 2026-07-20 05:08 AM CDT
+Last updated: 2026-07-20 05:18 AM CDT
 
 [![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
@@ -364,7 +364,7 @@ fires only when permission is currently granted in this session.
 
 ## Build
 
-System Node 22+ (the project uses Vite 5 + TypeScript; vanilla
+System Node 22+ (the project uses Vite 7 + TypeScript; vanilla
 DOM, no UI framework). On Asahi Fedora aarch64, an x86-64 nvm
 install can shadow the right binary, so:
 
