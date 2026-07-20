@@ -1,4 +1,4 @@
-import { IBatchBlock } from '@logseq/libs/dist/LSPlugin'
+import type { IBatchBlock } from '@logseq/libs/dist/LSPlugin'
 import Mustache from 'mustache'
 import { formatDate } from 'date-fns/format'
 import { KoreaderHighlight, KoreaderSidecar } from './sidecar'
