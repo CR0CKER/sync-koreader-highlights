@@ -6,72 +6,58 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Security
+## [0.1.7] – 2026-07-20
 
-- Added two CI security gates (`.github/workflows/security.yml`), both in
-  digest-pinned containers: **semgrep** SAST (security-audit + JS/TS +
-  OWASP-Top-Ten + github-actions packs, fails on any finding) and
-  **gitleaks** over the full git history + working tree. They complement
-  GitHub's native secret scanning/push protection and Dependabot — each
-  covers the others' blind spots.
-- Fixed the two findings the new SAST gate surfaced: **SHA-pinned all
-  GitHub Actions** (`actions/checkout`/`setup-node`/`upload-artifact` were
-  on mutable `@v4` tags) across every workflow, and added a **7-day
-  Dependabot `cooldown`** so a freshly-published (possibly compromised)
-  release can't reach us the moment it lands.
-- Cleared 5 dev/build-toolchain advisories (vite dev-server request
-  exposure, esbuild dev-server SSRF, and the vitest/vite-node/@vitest-mocker
-  chain) by bumping `vite` 5 → 7 and `vitest` 2 → 4. Both are dev-only and
-  never reach the shipped `dist/` bundle; the build (unchanged output) and
-  the 32-test suite validate the bump. The remaining 3 advisories are
-  vendored inside `@logseq/libs@0.0.17` (`dompurify`, `lodash-es`), whose
-  only fix is the `@logseq/libs@0.3.4` **pre-release** major — deliberately
-  not taken (unreachable from this plugin; would need manual Logseq QA).
-  See [`docs/adr/0001-dependency-vulnerability-posture.md`](docs/adr/0001-dependency-vulnerability-posture.md).
+### Fixed
+
+- **Collision-disambiguated book-page names no longer mangle the author.**
+  When two books shared a title, the fallback page name stringified the raw
+  author *array* (a comma-joined blob) instead of the clean author string —
+  `resolvePageName` was being passed a `string[]` where a `string` was
+  expected. A title clash now yields `Title — Author` as intended.
+- Restored type-checking, which had silently regressed: `tsc --noEmit` was
+  failing with 8 errors and was never run in CI (only `vite build`, which
+  strips types unchecked). Fixed the `date-fns/format` import (named
+  `formatDate`) and typed the `logseq.settings` locals. Runtime-neutral, but
+  it unblocked catching the page-name bug above.
 
 ### Added
 
-- Monthly `logseq-libs-watch` GitHub Actions workflow that compares the
-  pinned `@logseq/libs` against npm's stable `latest` (never the `next`
-  pre-release) and opens a single tracking issue when a newer stable
-  release appears — the re-rating trigger from ADR 0001 that would let us
-  fix the vendored `dompurify`/`lodash-es` advisories for real.
+- **Unit tests.** A Vitest suite (32 tests) over the pure parse/render layer
+  (`src/sidecar.ts`, `src/render.ts`): sidecar shapes (modern annotations,
+  legacy bookmarks, ribbon page-bookmarks, stubs, multi-author/keyword
+  separators), datetime parsing, page-name sanitising/collision handling,
+  and highlight/note/bookmark rendering. `npm test`; gated as its own CI job.
+- `npm run typecheck` + a Type-check CI step so type errors fail the build.
+- CI security gates (`.github/workflows/security.yml`): **semgrep** SAST and
+  **gitleaks** (full history + tree), both in digest-pinned containers; all
+  GitHub Actions SHA-pinned; a 7-day Dependabot `cooldown`.
+- Monthly `logseq-libs-watch` workflow: opens a tracking issue when
+  `@logseq/libs` publishes a stable release past the pinned version (the
+  re-rating trigger from ADR 0001).
+- README status-badge row (CI / license / release) and a `Last updated`
+  stamp.
 
 ### Changed
 
 - Documented that a **custom** highlight-block or heading template renders
   verbatim (no HTML/markdown escaping) so the user owns escaping — in the
-  code, the two settings descriptions, and the README (audit L2). The
-  default templates are unaffected (they use Logseq's escaped
-  structured-properties API).
+  code, the two settings descriptions, and the README. Default templates are
+  unaffected (they use Logseq's escaped structured-properties API).
 - README now warns prominently that highlights under the
-  `Highlights synced from …` block are rebuilt on every change-bearing
-  sync and must not be edited in place — put your own notes outside that
-  block (audit L3).
+  `Highlights synced from …` block are rebuilt on every change-bearing sync
+  and must not be edited in place — put your own notes outside that block.
+- Dev/build toolchain bumped (`vite` 5 → 7, `vitest` 2 → 4), clearing 5
+  dev-only advisories. The shipped `dist/` bundle is unchanged.
 
-### Fixed
+### Security
 
-- Restore type-checking: `tsc --noEmit` was failing with 8 errors and was
-  never run in CI (only `vite build`, which strips types unchecked). Fixed
-  the `date-fns/format` import (named `formatDate`), typed the
-  `logseq.settings` locals, and corrected `resolvePageName` being passed a
-  string array where a string was expected (collision-disambiguated page
-  names previously stringified the author array with a raw comma-join).
-
-### Added
-
-- `npm run typecheck` script and a Type-check step in CI so type errors
-  fail the build.
-- Vitest unit-test suite covering the pure parse/render layer
-  (`src/sidecar.ts`, `src/render.ts`): sidecar shapes (modern annotations,
-  legacy bookmarks, ribbon page-bookmarks, stubs, multi-author/keyword
-  separators), datetime parsing, page-name sanitising/collision handling
-  (incl. the M1 regression), and highlight/note/bookmark rendering. Run
-  with `npm test`; gated as its own `test` job in CI.
-- README status-badge row (CI / license / release) and a `Last updated`
-  stamp.
-- `import type` on the type-only `IBatchBlock` import in `render.ts` so the
-  module is cleanly importable under the test runner.
+- The remaining `dompurify`/`lodash-es` advisories are vendored inside
+  `@logseq/libs@0.0.17`; they are unreachable from this plugin and their
+  only fix is the `@logseq/libs@0.3.4` **pre-release** major, deliberately
+  not taken. Documented and tracked in
+  [`docs/adr/0001-dependency-vulnerability-posture.md`](docs/adr/0001-dependency-vulnerability-posture.md);
+  the monthly watch above surfaces a real fix when one lands.
 
 ## [0.1.6] – 2026-06-09
 
