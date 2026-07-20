@@ -1,0 +1,51 @@
+name: security
+
+# Deterministic security gates that complement the platform features already
+# on (GitHub secret scanning + push protection) and the build/test gates:
+#  - SAST (semgrep) — code-level bugs the dep/secret scanners don't see
+#  - gitleaks — secrets across the FULL git history + working tree
+# Both run in digest-pinned containers (supply-chain: pin AND hash every
+# fetched artifact); the pinned actions are SHA-pinned for the same reason.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: semgrep (SAST)
+        # NOTE: the `p/…` rule packs are fetched from the semgrep registry at
+        # run time — an unpinned rule input. Accepted tradeoff vs. vendoring
+        # rules; a new rule can surface a new finding on an unrelated PR, which
+        # is then triaged (fix, or a documented `# nosemgrep`), never blanket-
+        # disabled. `--error` makes any finding fail the job.
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/src -w /src \
+            semgrep/semgrep:1.169.0@sha256:2b33f46ba66cf8cc2ad59ccfa7d22951fd00c632c38f1339e84ec8e6e641a942 \
+            semgrep scan \
+              --config p/security-audit \
+              --config p/javascript \
+              --config p/typescript \
+              --config p/owasp-top-ten \
+              --config p/github-actions \
+              --exclude node_modules --exclude dist \
+              --error
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0 # full history — gitleaks scans every commit, not just the tip
+      - name: gitleaks (secrets, full history + tree)
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/repo \
+            zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git /repo --no-banner

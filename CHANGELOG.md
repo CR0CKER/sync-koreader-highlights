@@ -8,6 +8,17 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Added two CI security gates (`.github/workflows/security.yml`), both in
+  digest-pinned containers: **semgrep** SAST (security-audit + JS/TS +
+  OWASP-Top-Ten + github-actions packs, fails on any finding) and
+  **gitleaks** over the full git history + working tree. They complement
+  GitHub's native secret scanning/push protection and Dependabot — each
+  covers the others' blind spots.
+- Fixed the two findings the new SAST gate surfaced: **SHA-pinned all
+  GitHub Actions** (`actions/checkout`/`setup-node`/`upload-artifact` were
+  on mutable `@v4` tags) across every workflow, and added a **7-day
+  Dependabot `cooldown`** so a freshly-published (possibly compromised)
+  release can't reach us the moment it lands.
 - Cleared 5 dev/build-toolchain advisories (vite dev-server request
   exposure, esbuild dev-server SSRF, and the vitest/vite-node/@vitest-mocker
   chain) by bumping `vite` 5 → 7 and `vitest` 2 → 4. Both are dev-only and
