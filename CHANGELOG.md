@@ -19,8 +19,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 - `npm run typecheck` script and a Type-check step in CI so type errors
   fail the build.
+- Vitest unit-test suite covering the pure parse/render layer
+  (`src/sidecar.ts`, `src/render.ts`): sidecar shapes (modern annotations,
+  legacy bookmarks, ribbon page-bookmarks, stubs, multi-author/keyword
+  separators), datetime parsing, page-name sanitising/collision handling
+  (incl. the M1 regression), and highlight/note/bookmark rendering. Run
+  with `npm test`; gated as its own `test` job in CI.
 - README status-badge row (CI / license / release) and a `Last updated`
   stamp.
+- `import type` on the type-only `IBatchBlock` import in `render.ts` so the
+  module is cleanly importable under the test runner.
 
 ## [0.1.6] – 2026-06-09
 
