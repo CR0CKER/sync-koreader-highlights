@@ -42,7 +42,7 @@
     "typescript": "^5.4.0",
     "vite": "^5.4.0",
     "vite-plugin-logseq": "^1.1.2",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   },
   "logseq": {
     "id": "sync-koreader-highlights",
