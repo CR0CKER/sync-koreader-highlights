@@ -6,6 +6,22 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Restore type-checking: `tsc --noEmit` was failing with 8 errors and was
+  never run in CI (only `vite build`, which strips types unchecked). Fixed
+  the `date-fns/format` import (named `formatDate`), typed the
+  `logseq.settings` locals, and corrected `resolvePageName` being passed a
+  string array where a string was expected (collision-disambiguated page
+  names previously stringified the author array with a raw comma-join).
+
+### Added
+
+- `npm run typecheck` script and a Type-check step in CI so type errors
+  fail the build.
+- README status-badge row (CI / license / release) and a `Last updated`
+  stamp.
+
 ## [0.1.6] – 2026-06-09
 
 ### Fixed

@@ -112,7 +112,7 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const existing = bookIds[key]
     try {
       if (!existing) {
-        const pageName = resolvePageName(sidecar.title, sidecar.authors, isTaken)
+        const pageName = resolvePageName(sidecar.title, sidecar.authors?.join(', '), isTaken)
         takenInThisRun.add(pageName)
         console.log('sync-koreader-highlights: creating page', pageName)
         const created = await createBookPage(pageName, sidecar, ctx, syncDate)

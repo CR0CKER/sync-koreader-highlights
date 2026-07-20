@@ -79,7 +79,7 @@ const SETTINGS_SCHEMA: SettingSchemaDesc[] = [
 ]
 
 function backfillTemplateDefaults(): void {
-  const s = logseq.settings ?? {}
+  const s: Record<string, unknown> = logseq.settings ?? {}
   const updates: Record<string, string> = {}
   if (!(s.bookHeaderTemplate as string | undefined)?.trim()) {
     updates.bookHeaderTemplate = DEFAULT_TEMPLATES.bookHeader
@@ -97,7 +97,7 @@ function backfillTemplateDefaults(): void {
 }
 
 function loadTemplates(): Templates {
-  const s = logseq.settings ?? {}
+  const s: Record<string, unknown> = logseq.settings ?? {}
   return {
     bookHeader: (s.bookHeaderTemplate as string) || DEFAULT_TEMPLATES.bookHeader,
     highlightsHeading: (s.highlightsHeadingTemplate as string) || DEFAULT_TEMPLATES.highlightsHeading,

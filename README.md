@@ -1,5 +1,11 @@
 # Sync KOReader Highlights
 
+Last updated: 2026-07-20 04:57 AM CDT
+
+[![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/CR0CKER/sync-koreader-highlights?sort=semver)](https://github.com/CR0CKER/sync-koreader-highlights/releases)
+
 A Logseq plugin that imports your [KOReader](https://koreader.rocks/)
 highlights, notes, and bookmarks into your Logseq graph — one Logseq
 page per book, with rich properties, journal-day backlinks, and an
