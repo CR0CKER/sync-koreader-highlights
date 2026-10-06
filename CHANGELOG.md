@@ -6,13 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Security
-
-- Dev and build toolchain updated for five advisories: vitest and
-  `@vitest/mocker` to 4.1.11, postcss to 8.5.29 and its nanoid to 3.3.20.
-  None of them reach the shipped plugin, which `vite build` produces
-  unchanged. The DOMPurify advisories inside `@logseq/libs` stay accepted
-  as unreachable, per ADR 0001.
+## [0.1.8] – 2026-10-06
 
 ### Fixed
 
@@ -26,6 +20,14 @@ versions follow [Semantic Versioning](https://semver.org/).
   coordinates instead of `[object Object]`, so the next sync rebuilds
   books that were affected and their pages repair themselves. EPUB
   highlight ids are unchanged.
+
+### Security
+
+- Dev and build toolchain updated for five advisories: vitest and
+  `@vitest/mocker` to 4.1.11, postcss to 8.5.29 and its nanoid to 3.3.20.
+  None of them reach the shipped plugin, which `vite build` produces
+  unchanged. The DOMPurify advisories inside `@logseq/libs` stay accepted
+  as unreachable, per ADR 0001.
 
 ## [0.1.7] – 2026-07-20
 
