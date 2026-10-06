@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Dev and build toolchain updated for five advisories: vitest and
+  `@vitest/mocker` to 4.1.11, postcss to 8.5.29 and its nanoid to 3.3.20.
+  None of them reach the shipped plugin, which `vite build` produces
+  unchanged. The DOMPurify advisories inside `@logseq/libs` stay accepted
+  as unreachable, per ADR 0001.
+
 ### Fixed
 
 - **Highlights made in PDFs no longer sync as `> Bookmarked`** (#24).
