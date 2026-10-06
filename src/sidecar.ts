@@ -165,21 +165,36 @@ function extractHighlights(raw: any): KoreaderHighlight[] {
 /**
  * KOReader's ribbon page-bookmarks live alongside text highlights in
  * the `annotations` (modern) and `bookmarks` (legacy) arrays. They have
- * no `pos0`/`pos1` selection range — those are present on every text
- * highlight — and KOReader auto-fills `text` with "in <chapter>" so the
- * row renders as something in its own UI. We detect the shape via the
- * absent selection range and discard the auto-text so the renderer's
- * "empty text → page bookmark" path can produce `> Bookmarked`.
+ * no `pos0`/`pos1` selection range and no `drawer` (highlight style) —
+ * KOReader's own test for a page bookmark is `not item.drawer` — and
+ * KOReader auto-fills `text` with "in <chapter>" so the row renders as
+ * something in its own UI. We detect the shape and discard the auto-text
+ * so the renderer's "empty text → page bookmark" path can produce
+ * `> Bookmarked`.
  */
 function isRibbonBookmark(a: any): boolean {
-  return !stringOrUndefined(a?.pos0) && !stringOrUndefined(a?.pos1)
+  return !hasPosition(a?.pos0) && !hasPosition(a?.pos1) && !stringOrUndefined(a?.drawer)
+}
+
+/**
+ * A selection position: an xpointer string in reflowable documents
+ * (EPUB), a `{ page, x, y, zoom, rotation }` table in paged ones (PDF, DjVu).
+ */
+function hasPosition(pos: any): boolean {
+  return stringOrUndefined(pos) !== undefined || (typeof pos === 'object' && pos !== null)
+}
+
+/** A position as a stable string: the xpointer, or the table's page and coordinates. */
+function positionKey(pos: any): any {
+  if (typeof pos !== 'object' || pos === null) return pos
+  return [pos.page, pos.x, pos.y].join(':')
 }
 
 function deriveHighlightId(a: any): string {
   // Compose a stable per-highlight key. KOReader doesn't ship a UUID, but
   // the (datetime, pos0, pos1) tuple is unique within a sidecar; falling back
   // to the highlight text covers older bookmark-style entries.
-  const parts = [a.datetime, a.pos0, a.pos1, a.notes, a.text]
+  const parts = [a.datetime, positionKey(a.pos0), positionKey(a.pos1), a.notes, a.text]
     .filter((p) => p !== undefined && p !== null && p !== '')
     .map(String)
   return parts.join('|') || crypto.randomUUID()

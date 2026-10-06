@@ -6,6 +6,19 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Highlights made in PDFs no longer sync as `> Bookmarked`** (#24).
+  KOReader stores a PDF highlight's range as page coordinates
+  (`{ page, x, y, … }`) rather than an EPUB text position, and the
+  check that tells highlights from ribbon bookmarks only recognised the
+  text form, so every PDF highlight lost its text. Both forms are now
+  recognised, along with the highlight style KOReader itself uses to
+  tell them apart. PDF highlight ids are now built from the page
+  coordinates instead of `[object Object]`, so the next sync rebuilds
+  books that were affected and their pages repair themselves. EPUB
+  highlight ids are unchanged.
+
 ## [0.1.7] – 2026-07-20
 
 ### Fixed
