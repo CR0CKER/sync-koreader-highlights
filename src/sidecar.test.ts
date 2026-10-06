@@ -103,6 +103,52 @@ describe('parseSidecar', () => {
     expect(s.highlights[0].page).toBe(5)
   })
 
+  // PDF sidecars store pos0/pos1 as position tables, not xpointer strings
+  // (issue #24: every PDF highlight rendered as "Bookmarked").
+  function pdfSidecar(annotations: string): string {
+    return `return {
+      ["doc_props"] = { ["title"] = "A PDF", ["authors"] = "A" },
+      ["annotations"] = { ${annotations} },
+    }`
+  }
+  const pdfHighlight = (n: number, text: string, x: number) => `[${n}] = {
+      ["chapter"] = "", ["color"] = "gray", ["datetime"] = "2026-07-26 17:28:14",
+      ["drawer"] = "lighten", ["page"] = 6, ["pageno"] = 6,
+      ["pos0"] = { ["page"] = 6, ["rotation"] = 0, ["x"] = ${x}, ["y"] = 379.95, ["zoom"] = 2.55 },
+      ["pos1"] = { ["page"] = 6, ["rotation"] = 0, ["x"] = 216.78, ["y"] = 443.34, ["zoom"] = 2.55 },
+      ["text"] = "${text}",
+    },`
+
+  it('keeps the text of a PDF highlight whose pos0/pos1 are position tables', () => {
+    const s = parseSidecar(pdfSidecar(pdfHighlight(1, 'highlighted in a PDF', 80.6)))!
+    expect(s.highlights).toHaveLength(1)
+    expect(s.highlights[0].text).toBe('highlighted in a PDF')
+    expect(s.highlights[0].page).toBe(6)
+  })
+
+  it('still treats a PDF ribbon bookmark (page number, no positions) as a bookmark', () => {
+    const s = parseSidecar(pdfSidecar(
+      '[1] = { ["text"] = "in Chapter 2", ["datetime"] = "2026-07-26 17:30:00", ["page"] = 9, ["pageno"] = 9 },',
+    ))!
+    expect(s.highlights[0].text).toBe('')
+    expect(s.highlights[0].page).toBe(9)
+  })
+
+  it('gives PDF highlights ids built from their positions, not "[object Object]"', () => {
+    const s = parseSidecar(pdfSidecar(pdfHighlight(1, 'one', 80.6) + pdfHighlight(2, 'two', 120.1)))!
+    const [a, b] = s.highlights.map((h) => h.id)
+    expect(a).not.toContain('[object Object]')
+    expect(a).not.toBe(b)
+    expect(parseSidecar(pdfSidecar(pdfHighlight(1, 'one', 80.6)))!.highlights[0].id).toBe(a)
+  })
+
+  it('keeps EPUB highlight ids exactly as before, so a sync does not rebuild every EPUB book', () => {
+    const s = parseSidecar(modernSidecar())!
+    expect(s.highlights[0].id).toBe(
+      '2026-01-02 10:00:00|/body/DocFragment[1]/body/p[3]/text().0|/body/DocFragment[1]/body/p[3]/text().28|Sing to me of the man, Muse',
+    )
+  })
+
   it('falls back to the legacy bookmarks array when annotations are absent', () => {
     const lua = `return {
       ["doc_props"] = { ["title"] = "Old Book", ["authors"] = "A" },
