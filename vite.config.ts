@@ -5,6 +5,5 @@ export default defineConfig({
   plugins: [logseqDevPlugin()],
   build: {
     target: 'esnext',
-    minify: 'esbuild',
   },
 })
