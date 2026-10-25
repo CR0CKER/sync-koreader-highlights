@@ -8,6 +8,11 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The plugin is now built with Vite 8, which bundles with Rolldown and
+  minifies with Oxc and Lightning CSS instead of esbuild. The bundle is
+  about 3% smaller (180 → 175 kB); the panel's CSS is also minified now.
+  `vite.config.ts` drops its `minify: 'esbuild'` setting, which Vite 8
+  no longer supports without installing esbuild separately.
 - Type-checking now uses TypeScript 6. `tsconfig.json` moves off the
   two options TypeScript 6 deprecates: module resolution is `Bundler`
   (what Vite actually does) instead of `Node`, and `esModuleInterop` is
