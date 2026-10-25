@@ -456,3 +456,40 @@ export function resolvePageName(title: string, authors: string | undefined, take
   while (taken(`${base} (${i})`)) i++
   return `${base} (${i})`
 }
+
+/**
+ * A title reduced for loose comparison: lower-cased, with the punctuation
+ * that separates title parts (`/ , : ; – —`) and runs of spaces folded to one
+ * space. Other punctuation stays, so `Catch-22` and `Catch 22` differ.
+ */
+export function normaliseTitle(title: string): string {
+  return sanitisePageName(title)
+    .toLowerCase()
+    .replace(/[/,:;–—]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** The fields of a Logseq page entity that findSimilarPageName reads. */
+export interface PageNameEntry {
+  originalName?: string
+  name?: string
+  'journal?'?: boolean
+}
+
+/**
+ * Find an existing page for a book whose title differs from the page name
+ * only in punctuation (#45), e.g. a reading-list page `Good Strategy, Bad
+ * Strategy` for KOReader's `Good Strategy/Bad Strategy`. Returns the page's
+ * name only when exactly one non-journal page matches and no other synced book
+ * owns it (`owned` holds lower-cased page names); otherwise undefined, and the
+ * caller creates a new page as before.
+ */
+export function findSimilarPageName(title: string, pages: PageNameEntry[], owned: Set<string>): string | undefined {
+  const target = normaliseTitle(title)
+  const matches = pages.filter((p) => {
+    const name = p.originalName ?? p.name
+    return !!name && !p['journal?'] && !owned.has(name.toLowerCase()) && normaliseTitle(name) === target
+  })
+  return matches.length === 1 ? (matches[0].originalName ?? matches[0].name) : undefined
+}

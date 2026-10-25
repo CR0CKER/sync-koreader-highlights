@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_TEMPLATES,
   RenderContext,
+  findSimilarPageName,
   isIndexReceiptHeading,
+  normaliseTitle,
   parseKoreaderDatetime,
   renderBookHeaderProperties,
   renderHighlight,
@@ -74,6 +76,58 @@ describe('resolvePageName', () => {
     const taken = new Set(['Poems', 'Poems — Anon'])
     const name = resolvePageName('Poems', 'Anon', (n) => taken.has(n))
     expect(name).toBe('Poems (2)')
+  })
+})
+
+describe('normaliseTitle', () => {
+  it('folds case and the punctuation that separates title parts', () => {
+    expect(normaliseTitle('Good Strategy, Bad Strategy')).toBe('good strategy bad strategy')
+    expect(normaliseTitle('Good Strategy/Bad Strategy')).toBe('good strategy bad strategy')
+    expect(normaliseTitle('This Life: Secular Faith')).toBe(normaliseTitle('This Life — Secular Faith'))
+    expect(normaliseTitle('A – B ; C')).toBe('a b c')
+  })
+
+  it('keeps letters, digits and other punctuation', () => {
+    expect(normaliseTitle("Self-Reliance (1841)")).toBe('self-reliance (1841)')
+    expect(normaliseTitle('Catch-22')).not.toBe(normaliseTitle('Catch 22'))
+  })
+})
+
+describe('findSimilarPageName (#45)', () => {
+  const page = (originalName: string, extra: Record<string, unknown> = {}) => ({ originalName, ...extra })
+  const none = new Set<string>()
+
+  it('finds the one page whose name differs only in punctuation', () => {
+    const pages = [page('Good Strategy, Bad Strategy'), page('Strategy')]
+    expect(findSimilarPageName('Good Strategy/Bad Strategy', pages, none)).toBe('Good Strategy, Bad Strategy')
+  })
+
+  it('matches a colon in the title against an em dash in the page name', () => {
+    const pages = [page('This Life — Secular Faith and Spiritual Freedom')]
+    expect(findSimilarPageName('This Life: Secular Faith and Spiritual Freedom', pages, none))
+      .toBe('This Life — Secular Faith and Spiritual Freedom')
+  })
+
+  it('returns undefined when no page matches', () => {
+    expect(findSimilarPageName('Good Strategy/Bad Strategy', [page('Good Strategy')], none)).toBeUndefined()
+  })
+
+  it('does not guess when two pages match', () => {
+    const pages = [page('Good Strategy, Bad Strategy'), page('Good Strategy; Bad Strategy')]
+    expect(findSimilarPageName('Good Strategy/Bad Strategy', pages, none)).toBeUndefined()
+  })
+
+  it('skips journal pages', () => {
+    expect(findSimilarPageName('Oct 6th, 2026', [page('Oct 6th 2026', { 'journal?': true })], none)).toBeUndefined()
+  })
+
+  it('skips pages another synced book already owns (case-insensitively)', () => {
+    const owned = new Set(['good strategy, bad strategy'])
+    expect(findSimilarPageName('Good Strategy/Bad Strategy', [page('Good Strategy, Bad Strategy')], owned)).toBeUndefined()
+  })
+
+  it('falls back to `name` when a page has no originalName', () => {
+    expect(findSimilarPageName('A/B', [{ name: 'a, b' }], none)).toBe('a, b')
   })
 })
 

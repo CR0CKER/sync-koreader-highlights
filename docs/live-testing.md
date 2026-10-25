@@ -52,7 +52,9 @@ F='del(.lastSync, .boundGraph) | .bookIdsMap |= map_values(del(.pageUuid))'
 diff <(jq -S "$F" old/$S) <(jq -S "$F" new/$S)
 ```
 
-All three should print nothing. What they leave out, and why:
+For a change that only rebuilds the bundle, all three should print nothing.
+When the new build changes behaviour on purpose, they show the change; check
+that it's the intended one and nothing else. What they leave out, and why:
 
 - `KOReader.md`: its first line is the receipt's "Synced on" time.
 - `custom.css`: Logseq creates it in every fresh profile.
@@ -62,8 +64,10 @@ All three should print nothing. What they leave out, and why:
 Matching runs only show the two builds agree. To check that they're also
 right, read `new/graph/pages/`: the user's note on `The Odyssey` should still
 be there, the PDF highlight should keep its text, the bookmark should read
-`> Bookmarked`, and the KOReader note should sit as a child block under its
-highlight in `The Lantern Archive — A Novel`.
+`> Bookmarked`, the KOReader note should sit as a child block under its
+highlight in `The Lantern Archive — A Novel`, and the highlight from
+`Slow Reading/Fast Thinking` should be on the existing
+`Slow Reading, Fast Thinking` page, with no second page (#45).
 
 `--graph`, `--books` and `--settings` point a run at other data. Use them
 with made-up data only, never a real graph or library.
