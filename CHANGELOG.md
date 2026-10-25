@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.9] – 2026-10-25
+
 ### Fixed
 
 - **A book no longer gets a second page when its title differs from your
