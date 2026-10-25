@@ -48,6 +48,9 @@ PATH=/usr/bin:$PATH /usr/bin/npm test
 
 Full end-to-end testing still means syncing against a small KOReader
 directory and inspecting the produced Logseq pages and console output.
+For changes that rebuild the bundle without changing the code, compare
+the new build with the last release using
+[docs/live-testing.md](docs/live-testing.md).
 CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml) +
 [`security.yml`](./.github/workflows/security.yml)) runs type-check,
 build, unit tests, semgrep SAST, and gitleaks on every push and PR;

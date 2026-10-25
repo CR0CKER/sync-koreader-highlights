@@ -6,6 +6,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/live-sync.mjs` and [docs/live-testing.md](docs/live-testing.md):
+  sync a build in a throwaway Logseq OG on made-up test data
+  (`scripts/live-fixture/`), to compare a new build with the last release
+  before shipping it.
+- The README says how a book is matched to an existing page (by name),
+  what happens when the names differ only in punctuation (#45), and how
+  to merge the two pages by hand.
+
 ### Changed
 
 - The plugin is now built with Vite 8, which bundles with Rolldown and
@@ -20,6 +30,8 @@ versions follow [Semantic Versioning](https://semver.org/).
 - Unit tests run on Vitest 5.
 - date-fns 4.4.0 and idb-keyval 6.3.0. CI's checkout, setup-node and
   upload-artifact actions move to v7.
+- `@types/node` follows the Node 22 that CI runs; Dependabot no longer
+  proposes its major versions.
 
 ### Security
 
