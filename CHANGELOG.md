@@ -6,6 +6,24 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Type-checking now uses TypeScript 6. `tsconfig.json` moves off the
+  two options TypeScript 6 deprecates: module resolution is `Bundler`
+  (what Vite actually does) instead of `Node`, and `esModuleInterop` is
+  on. `tsc` only type-checks here, so the shipped plugin is unchanged.
+- date-fns 4.4.0 and idb-keyval 6.3.0. CI's checkout, setup-node and
+  upload-artifact actions move to v7.
+
+### Security
+
+- Dev toolchain updated for four advisories: vite to 7.3.7 (three in
+  its editor launcher, Windows only) and vitest and `@vitest/mocker` to
+  4.1.12. None of them reach the shipped plugin. Two new DOMPurify
+  advisories inside `@logseq/libs` are accepted as unreachable, per
+  ADR 0001: both need a DOMPurify hook or parser option that nothing
+  here sets.
+
 ## [0.1.8] – 2026-10-06
 
 ### Fixed
