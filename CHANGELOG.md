@@ -6,6 +6,11 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/live-testing.md` compares a new build with the latest release
+  instead of a fixed v0.1.8.
+
 ## [0.1.9] – 2026-10-25
 
 ### Fixed
