@@ -11,6 +11,11 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    ignore:
+      # Node's types follow the Node that CI runs (node-version in
+      # ci.yml), not the newest Node. Bump both together by hand.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       minor-and-patch:
         update-types:
