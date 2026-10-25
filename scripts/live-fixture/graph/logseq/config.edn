@@ -1,0 +1,5 @@
+;; Synthetic test graph for scripts/live-sync.mjs.
+{:meta/version 1
+ :preferred-format :markdown
+ :file/name-format :triple-lowbar
+ :journal/page-title-format "MMM do, yyyy"}

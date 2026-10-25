@@ -1,6 +1,6 @@
 # Sync KOReader Highlights
 
-Last updated: 2026-10-25 06:41 AM CDT
+Last updated: 2026-10-25 07:50 AM CDT
 
 [![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
@@ -146,6 +146,16 @@ heading:
     property and renders correctly in Logseq's UI).
   - Title collisions get disambiguated as `<title> — <authors>` or
     `<title> (n)`.
+  - If a page with that name already exists (one you made, or one
+    from the reading-list plugin), the highlights go onto it. Only the
+    name is compared, so `Good Strategy, Bad Strategy` and
+    `Good Strategy/Bad Strategy` count as different books, so the sync
+    makes a second page
+    ([#45](https://github.com/CR0CKER/sync-koreader-highlights/issues/45)).
+    To merge them by hand, move the highlights block onto your page,
+    delete the new page, and, with Logseq closed, set that book's
+    `title` in `bookIdsMap` (in the plugin's settings file) to your
+    page's name.
 
 - **Page-level properties** (defined by the customisable
   Book-page header template and written via Logseq's structured
@@ -394,7 +404,7 @@ PATH=/usr/bin:$PATH /usr/bin/npm run build
 ```
 
 Output lands in `dist/` (one `index.html` + one bundled JS
-asset, ≈180 KB).
+asset, ≈175 KB).
 
 ### Checks
 
@@ -409,6 +419,11 @@ Tests cover the pure parse/render layer (`src/sidecar.ts`,
 `src/render.ts`) via `src/*.test.ts` — no `logseq` global or DOM
 needed. Vitest uses its own `vitest.config.ts` (not `vite.config.ts`,
 whose `vite-plugin-logseq` only runs in the dev-server path).
+
+The unit tests don't load the plugin in Logseq. For a change that
+rebuilds the shipped bundle (a new Vite, a dependency bump), compare
+the new build against the last release in a throwaway Logseq, on
+made-up test data: see [docs/live-testing.md](docs/live-testing.md).
 
 CI also runs two security gates (`.github/workflows/security.yml`),
 both in digest-pinned containers — reproduce them with any OCI runtime
