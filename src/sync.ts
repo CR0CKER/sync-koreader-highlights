@@ -9,8 +9,10 @@ import {
 } from './sidecar'
 import {
   DEFAULT_TEMPLATES,
+  PageNameEntry,
   RenderContext,
   Templates,
+  findSimilarPageName,
   isIndexReceiptHeading,
   parseKoreaderDatetime,
   renderBookHeaderProperties,
@@ -18,6 +20,7 @@ import {
   renderIndexReceipt,
   renderUpdateSection,
   resolvePageName,
+  sanitisePageName,
 } from './render'
 import {
   BookIdEntry,
@@ -100,6 +103,9 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
   const takenInThisRun = new Set<string>()
   const allKnownPageNames = new Set(Object.values(bookIds).map((e) => e.title))
   const isTaken = (name: string) => takenInThisRun.has(name) || allKnownPageNames.has(name)
+  // Loaded once, and only if some new book has no page of exactly its name.
+  let graphPages: PageNameEntry[] | undefined
+  const ownedPageNames = () => new Set([...allKnownPageNames, ...takenInThisRun].map((n) => n.toLowerCase()))
 
   console.log('sync-koreader-highlights: parsed sidecars:', sidecars.length, 'stubs skipped:', result.skippedStubs)
   console.log('sync-koreader-highlights: bookIdsMap entries:', Object.keys(bookIds).length, 'highlightIdsMap entries:', Object.keys(highlightIds).length)
@@ -112,7 +118,19 @@ export async function runSync(opts: SyncOptions): Promise<SyncResult> {
     const existing = bookIds[key]
     try {
       if (!existing) {
-        const pageName = resolvePageName(sidecar.title, sidecar.authors?.join(', '), isTaken)
+        let pageName = resolvePageName(sidecar.title, sidecar.authors?.join(', '), isTaken)
+        // No page of exactly this name: reuse one whose name differs only in
+        // punctuation (#45), e.g. a reading-list page "Good Strategy, Bad
+        // Strategy" for KOReader's "Good Strategy/Bad Strategy". Skipped when
+        // the name was disambiguated, i.e. another book already has the title.
+        if (pageName === sanitisePageName(sidecar.title) && !(await logseq.Editor.getPage(pageName))) {
+          graphPages ??= ((await logseq.Editor.getAllPages()) ?? []) as PageNameEntry[]
+          const similar = findSimilarPageName(sidecar.title, graphPages, ownedPageNames())
+          if (similar) {
+            console.log('sync-koreader-highlights: reusing similarly named page', similar, 'for', sidecar.title)
+            pageName = similar
+          }
+        }
         takenInThisRun.add(pageName)
         console.log('sync-koreader-highlights: creating page', pageName)
         const created = await createBookPage(pageName, sidecar, ctx, syncDate)

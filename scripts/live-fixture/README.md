@@ -9,7 +9,7 @@ from a real library or graph.
 | The Lantern Archive: A Novel | new page; colon in the title; series, keywords, a note; a ribbon bookmark |
 | The Odyssey | a page with that name already exists; the user's note on it must survive |
 | Field Notes (PDF) | PDF positions as page-coordinate tables (#24) |
-| Slow Reading/Fast Thinking | the graph has `Slow Reading, Fast Thinking`; makes a second page today (#45) |
+| Slow Reading/Fast Thinking | the graph has `Slow Reading, Fast Thinking`; since #45 the highlights go onto that page (v0.1.8 and earlier made a second page) |
 | Unopened | a stub sidecar with no `doc_props`; skipped |
 
 Each sidecar has its own `partial_md5_checksum`, so the plugin tells the

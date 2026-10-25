@@ -1,5 +1,6 @@
 -- Synthetic sidecar. The graph has "Slow Reading, Fast Thinking"; this title
--- uses a slash, so today the sync makes a second page (issue #45).
+-- uses a slash. Since #45 the highlights go onto that page; v0.1.8 and
+-- earlier made a second page.
 return {
     ["annotations"] = {
         [1] = {

@@ -1,6 +1,6 @@
 # Sync KOReader Highlights
 
-Last updated: 2026-10-25 07:50 AM CDT
+Last updated: 2026-10-25 08:44 AM CDT
 
 [![CI](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml/badge.svg)](https://github.com/CR0CKER/sync-koreader-highlights/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/CR0CKER/sync-koreader-highlights)](LICENSE)
@@ -147,15 +147,20 @@ heading:
   - Title collisions get disambiguated as `<title> — <authors>` or
     `<title> (n)`.
   - If a page with that name already exists (one you made, or one
-    from the reading-list plugin), the highlights go onto it. Only the
-    name is compared, so `Good Strategy, Bad Strategy` and
-    `Good Strategy/Bad Strategy` count as different books, so the sync
-    makes a second page
+    from the reading-list plugin), the highlights go onto it. Names
+    that differ only in case or in the punctuation between title
+    parts (`/ , : ; – —`) count as the same, so a KOReader book
+    `Good Strategy/Bad Strategy` lands on your page
+    `Good Strategy, Bad Strategy`
     ([#45](https://github.com/CR0CKER/sync-koreader-highlights/issues/45)).
-    To merge them by hand, move the highlights block onto your page,
-    delete the new page, and, with Logseq closed, set that book's
-    `title` in `bookIdsMap` (in the plugin's settings file) to your
-    page's name.
+    This applies only when exactly one such page exists, it isn't a
+    journal, and no other synced book uses it; otherwise the sync
+    makes a new page. Existing page properties, such as `author::`,
+    are kept.
+  - A second page made by an earlier version stays until you merge
+    it: move the highlights block onto your page, delete the new page,
+    and, with Logseq closed, set that book's `title` in `bookIdsMap`
+    (in the plugin's settings file) to your page's name.
 
 - **Page-level properties** (defined by the customisable
   Book-page header template and written via Logseq's structured

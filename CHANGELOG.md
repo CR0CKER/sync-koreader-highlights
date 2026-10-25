@@ -6,15 +6,26 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A book no longer gets a second page when its title differs from your
+  page's only in punctuation** (#45). KOReader's
+  `Good Strategy/Bad Strategy` now lands on an existing
+  `Good Strategy, Bad Strategy` page, for example one from the
+  reading-list plugin, instead of a new page beside it. Case and the
+  punctuation between title parts (`/ , : ; – —`) are ignored. The
+  existing page is used only when it's the single match, isn't a journal
+  and no other synced book uses it. Second pages made by earlier versions
+  stay until merged by hand (see the README).
+
 ### Added
 
 - `scripts/live-sync.mjs` and [docs/live-testing.md](docs/live-testing.md):
   sync a build in a throwaway Logseq OG on made-up test data
   (`scripts/live-fixture/`), to compare a new build with the last release
   before shipping it.
-- The README says how a book is matched to an existing page (by name),
-  what happens when the names differ only in punctuation (#45), and how
-  to merge the two pages by hand.
+- The README says how a book is matched to an existing page and how to
+  merge a second page left by an earlier version.
 
 ### Changed
 
