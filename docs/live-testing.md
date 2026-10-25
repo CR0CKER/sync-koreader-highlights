@@ -29,8 +29,8 @@ read or opened.
 
 ```sh
 RUN=$(mktemp -d)
-gh release download v0.1.8 -R CR0CKER/sync-koreader-highlights -p '*.zip' -D "$RUN"
-unzip -q "$RUN"/sync-koreader-highlights-0.1.8.zip -d "$RUN/released"
+gh release download -R CR0CKER/sync-koreader-highlights -p '*.zip' -D "$RUN"   # latest release
+unzip -q "$RUN"/sync-koreader-highlights-*.zip -d "$RUN/released"
 
 npm run build
 node scripts/live-sync.mjs --dist "$RUN/released/dist" --out "$RUN/old" --port 9721
