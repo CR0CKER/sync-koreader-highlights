@@ -13,10 +13,11 @@ versions follow [Semantic Versioning](https://semver.org/).
   about 3% smaller (180 → 175 kB); the panel's CSS is also minified now.
   `vite.config.ts` drops its `minify: 'esbuild'` setting, which Vite 8
   no longer supports without installing esbuild separately.
-- Type-checking now uses TypeScript 6. `tsconfig.json` moves off the
-  two options TypeScript 6 deprecates: module resolution is `Bundler`
+- Type-checking now uses TypeScript 7. `tsconfig.json` moves off the
+  two options TypeScript 6 deprecated: module resolution is `Bundler`
   (what Vite actually does) instead of `Node`, and `esModuleInterop` is
   on. `tsc` only type-checks here, so the shipped plugin is unchanged.
+- Unit tests run on Vitest 5.
 - date-fns 4.4.0 and idb-keyval 6.3.0. CI's checkout, setup-node and
   upload-artifact actions move to v7.
 
